@@ -13,6 +13,7 @@ export function TriviaStudy() {
     isFlipped,
     flipCard,
     rateCard,
+    skipCard,
     session,
     dueCount,
     newCount,
@@ -84,6 +85,15 @@ export function TriviaStudy() {
               isFlipped={isFlipped}
               onFlip={flipCard}
             />
+
+            <div className="flex justify-center">
+              <button
+                onClick={skipCard}
+                className="text-slate-500 hover:text-slate-300 text-sm transition-colors"
+              >
+                Skip
+              </button>
+            </div>
 
             {isFlipped && (
               <div className="animate-fade-in">

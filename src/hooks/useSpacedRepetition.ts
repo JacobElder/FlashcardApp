@@ -1,4 +1,13 @@
 import { useState, useCallback, useMemo } from 'react';
+
+function shuffle<T>(arr: T[]): T[] {
+  const out = [...arr];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
 import type { FlashCard, CardProgress, Rating, StudySession } from '../types';
 import {
   createInitialProgress,
@@ -19,6 +28,7 @@ interface UseSpacedRepetitionReturn {
   isFlipped: boolean;
   flipCard: () => void;
   rateCard: (rating: Rating) => void;
+  skipCard: () => void;
   session: StudySession;
   dueCount: number;
   newCount: number;
@@ -68,9 +78,9 @@ export function useSpacedRepetition({
       }
     });
 
-    // Build study queue: due cards first, then limited new cards
+    // Build study queue: due cards first, then limited new cards — both shuffled
     const newToAdd = newC.slice(0, newCardsPerSession);
-    const queue = [...due, ...newToAdd].filter(card => !reviewedInSession.has(card.id));
+    const queue = [...shuffle(due), ...shuffle(newToAdd)].filter(card => !reviewedInSession.has(card.id));
 
     return { dueCards: due, newCards: newC, studyQueue: queue };
   }, [cards, progressMap, newCardsPerSession, reviewedInSession]);
@@ -88,6 +98,15 @@ export function useSpacedRepetition({
   const flipCard = useCallback(() => {
     setIsFlipped(prev => !prev);
   }, []);
+
+  // Skip card — move to next without rating, card stays in queue
+  const skipCard = useCallback(() => {
+    setIsFlipped(false);
+    setCurrentIndex(prev => {
+      const next = prev + 1;
+      return next >= studyQueue.length ? 0 : next;
+    });
+  }, [studyQueue.length]);
 
   // Rate card and update progress
   const rateCard = useCallback((rating: Rating) => {
@@ -144,6 +163,7 @@ export function useSpacedRepetition({
     isFlipped,
     flipCard,
     rateCard,
+    skipCard,
     session,
     dueCount: dueCards.length,
     newCount: newCards.length,
