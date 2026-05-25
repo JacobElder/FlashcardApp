@@ -4,7 +4,7 @@ import { RatingButtons } from '../components/RatingButtons';
 import { ProgressBar } from '../components/ProgressBar';
 import { EmptyState } from '../components/EmptyState';
 import { AddWordModal } from '../components/AddWordModal';
-import { useSpacedRepetition } from '../hooks/useSpacedRepetition';
+import { useAdaptiveTesting } from '../hooks/useAdaptiveTesting';
 import { vocabularyCards } from '../data/vocabularyCards';
 import { getUserVocabulary, addUserWord } from '../lib/storage';
 import type { VocabularyCard, NewWordFormData } from '../types';
@@ -32,16 +32,14 @@ export function VocabularyStudy() {
     rateCard,
     skipCard,
     session,
-    dueCount,
-    newCount,
     totalCards,
     masteryLevel,
     hasMoreCards,
     resetSession,
-  } = useSpacedRepetition({
+    userAbility,
+  } = useAdaptiveTesting({
     cards: allCards,
     storageKey: STORAGE_KEY,
-    newCardsPerSession: 15,
   });
 
   const handleAddWord = (data: NewWordFormData) => {
@@ -100,16 +98,12 @@ export function VocabularyStudy() {
       {/* Stats */}
       <div className="flex justify-center gap-6 py-4 px-4 border-b border-slate-800">
         <div className="text-center">
-          <p className="text-2xl font-bold text-blue-400">{dueCount}</p>
-          <p className="text-xs text-slate-400">Due</p>
-        </div>
-        <div className="text-center">
-          <p className="text-2xl font-bold text-emerald-400">{newCount}</p>
-          <p className="text-xs text-slate-400">New</p>
+          <p className="text-2xl font-bold text-purple-400">{userAbility.toFixed(2)}</p>
+          <p className="text-xs text-slate-400">Ability (θ)</p>
         </div>
         <div className="text-center">
           <p className="text-2xl font-bold text-slate-300">{totalCards}</p>
-          <p className="text-xs text-slate-400">Total</p>
+          <p className="text-xs text-slate-400">Total Cards</p>
         </div>
         <div className="text-center">
           <p className="text-2xl font-bold text-amber-400">

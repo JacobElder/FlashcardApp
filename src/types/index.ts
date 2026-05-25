@@ -1,10 +1,18 @@
 // Card types
+export type CardFormat = 'open' | 'mc';
+
 export interface FlashCard {
   id: string;
   type: 'trivia' | 'vocabulary';
   front: string;
   back: string;
+  options?: string[];
+  difficulty?: number;
+  discrimination?: number;
+  mcDifficulty?: number;
+  mcDiscrimination?: number;
   category?: string;
+  hint?: string;
   isUserAdded?: boolean;
 }
 
@@ -21,14 +29,17 @@ export interface TriviaCard extends FlashCard {
   category: string;
 }
 
-// SM-2 progress tracking
-export interface CardProgress {
+// IRT State tracking
+export interface IRTCardHistory {
   cardId: string;
-  easeFactor: number;     // Min 1.3, default 2.5
-  interval: number;       // Days until next review
-  repetitions: number;    // Consecutive correct answers
-  nextReviewDate: string; // ISO date string
-  lastReviewDate?: string;
+  timesAnswered: number;
+  timesCorrect: number;
+  lastAnsweredDate?: string;
+}
+
+export interface IRTProfile {
+  ability: number;
+  cardHistory: Record<string, IRTCardHistory>;
 }
 
 // Rating values for SM-2
@@ -44,6 +55,15 @@ export const RATING_VALUES: Record<RatingName, Rating> = {
   easy: 5,
 } as const;
 
+// Confidence prediction before flip
+export type ConfidencePrediction = 'know' | 'unsure';
+
+// Per-category session breakdown
+export interface CategorySessionStats {
+  correct: number;
+  total: number;
+}
+
 // User-added vocabulary (stored separately)
 export interface UserVocabulary {
   words: VocabularyCard[];
@@ -56,6 +76,11 @@ export interface StudySession {
   correctCount: number;
   incorrectCount: number;
   startTime: string;
+  categoryStats: Record<string, CategorySessionStats>;
+  predictions: {
+    total: number;    // cards where user made a prediction
+    correct: number;  // predicted "know" AND rated >= 3
+  };
 }
 
 // Tab types

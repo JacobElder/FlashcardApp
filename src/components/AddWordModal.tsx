@@ -15,6 +15,8 @@ export function AddWordModal({ isOpen, onClose, onAdd }: AddWordModalProps) {
     example: '',
   });
   const [errors, setErrors] = useState<Partial<NewWordFormData>>({});
+  const [isLoading, setIsLoading] = useState(false);
+  const [fetchError, setFetchError] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,7 +45,41 @@ export function AddWordModal({ isOpen, onClose, onAdd }: AddWordModalProps) {
     // Reset form
     setFormData({ word: '', definition: '', partOfSpeech: '', example: '' });
     setErrors({});
+    setFetchError('');
     onClose();
+  };
+
+  const handleAutoFill = async () => {
+    if (!formData.word.trim()) {
+      setErrors({ word: 'Please enter a word to auto-fill' });
+      return;
+    }
+    
+    setIsLoading(true);
+    setFetchError('');
+    
+    try {
+      const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(formData.word.trim())}`);
+      if (!res.ok) {
+        throw new Error('Word not found or API error');
+      }
+      const data = await res.json();
+      
+      const firstMeaning = data[0]?.meanings[0];
+      const firstDefinition = firstMeaning?.definitions[0];
+      
+      setFormData(prev => ({
+        ...prev,
+        definition: firstDefinition?.definition || prev.definition,
+        partOfSpeech: firstMeaning?.partOfSpeech || prev.partOfSpeech,
+        example: firstDefinition?.example || prev.example,
+      }));
+      setErrors({});
+    } catch (err) {
+      setFetchError('Could not find definition for this word.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleChange = (
@@ -103,20 +139,33 @@ export function AddWordModal({ isOpen, onClose, onAdd }: AddWordModalProps) {
               >
                 Word <span className="text-red-400">*</span>
               </label>
-              <input
-                type="text"
-                id="word"
-                name="word"
-                value={formData.word}
-                onChange={handleChange}
-                className={`w-full bg-slate-700 border ${
-                  errors.word ? 'border-red-500' : 'border-slate-600'
-                } rounded-lg px-4 py-2.5 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
-                placeholder="Enter word"
-                autoComplete="off"
-              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  id="word"
+                  name="word"
+                  value={formData.word}
+                  onChange={handleChange}
+                  className={`flex-1 w-full bg-slate-700 border ${
+                    errors.word ? 'border-red-500' : 'border-slate-600'
+                  } rounded-lg px-4 py-2.5 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
+                  placeholder="Enter word"
+                  autoComplete="off"
+                />
+                <button
+                  type="button"
+                  onClick={handleAutoFill}
+                  disabled={isLoading || !formData.word.trim()}
+                  className="bg-slate-600 hover:bg-slate-500 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg font-medium transition-colors whitespace-nowrap"
+                >
+                  {isLoading ? 'Loading...' : 'Auto-fill'}
+                </button>
+              </div>
               {errors.word && (
                 <p className="text-red-400 text-sm mt-1">{errors.word}</p>
+              )}
+              {fetchError && (
+                <p className="text-yellow-400 text-sm mt-1">{fetchError}</p>
               )}
             </div>
 

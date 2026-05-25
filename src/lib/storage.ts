@@ -1,10 +1,11 @@
-import type { CardProgress, UserVocabulary, VocabularyCard } from '../types';
+import type { UserVocabulary, VocabularyCard } from '../types';
 
 const STORAGE_KEYS = {
   TRIVIA_PROGRESS: 'nyc-trivia-progress',
   VOCABULARY_PROGRESS: 'nyc-vocabulary-progress',
   USER_VOCABULARY: 'nyc-user-vocabulary',
   STUDY_STATS: 'nyc-study-stats',
+  INCORRECT_COUNTS: 'nyc-incorrect-counts',
 } as const;
 
 /**
@@ -43,35 +44,7 @@ export function removeFromStorage(key: string): void {
   }
 }
 
-// Trivia Progress
-export function getTriviaProgress(): Record<string, CardProgress> {
-  return getFromStorage(STORAGE_KEYS.TRIVIA_PROGRESS, {});
-}
-
-export function setTriviaProgress(progress: Record<string, CardProgress>): void {
-  setToStorage(STORAGE_KEYS.TRIVIA_PROGRESS, progress);
-}
-
-export function updateTriviaCardProgress(cardId: string, progress: CardProgress): void {
-  const current = getTriviaProgress();
-  current[cardId] = progress;
-  setTriviaProgress(current);
-}
-
-// Vocabulary Progress
-export function getVocabularyProgress(): Record<string, CardProgress> {
-  return getFromStorage(STORAGE_KEYS.VOCABULARY_PROGRESS, {});
-}
-
-export function setVocabularyProgress(progress: Record<string, CardProgress>): void {
-  setToStorage(STORAGE_KEYS.VOCABULARY_PROGRESS, progress);
-}
-
-export function updateVocabularyCardProgress(cardId: string, progress: CardProgress): void {
-  const current = getVocabularyProgress();
-  current[cardId] = progress;
-  setVocabularyProgress(current);
-}
+// Removed SM-2 progress functions
 
 // User-added vocabulary
 export function getUserVocabulary(): UserVocabulary {
@@ -108,10 +81,7 @@ export function deleteUserWord(wordId: string): void {
   current.lastUpdated = new Date().toISOString();
   setUserVocabulary(current);
 
-  // Also remove progress for this word
-  const progress = getVocabularyProgress();
-  delete progress[wordId];
-  setVocabularyProgress(progress);
+  // Progress is now tracked via IRT profiles per deck
 }
 
 // Study statistics
@@ -151,6 +121,17 @@ export function updateStudyStats(correct: number, incorrect: number): void {
 
   stats.lastStudyDate = today;
   setToStorage(STORAGE_KEYS.STUDY_STATS, stats);
+}
+
+// Incorrect counts — tracks how many times each card has been rated "again" (0)
+export function getIncorrectCounts(): Record<string, number> {
+  return getFromStorage<Record<string, number>>(STORAGE_KEYS.INCORRECT_COUNTS, {});
+}
+
+export function incrementIncorrectCount(cardId: string): void {
+  const counts = getIncorrectCounts();
+  counts[cardId] = (counts[cardId] ?? 0) + 1;
+  setToStorage(STORAGE_KEYS.INCORRECT_COUNTS, counts);
 }
 
 // Clear all data

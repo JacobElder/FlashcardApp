@@ -1,0 +1,302 @@
+[
+  {
+    "category": "Pop Culture: Music",
+    "question": "What rapper, born in Brooklyn, released the critically acclaimed 1994 debut album 'Ready to Die'?",
+    "answer": "The Notorious B.I.G.",
+    "options": ["Jay-Z", "Nas", "50 Cent"]
+  },
+  {
+    "category": "Before & After",
+    "question": "What 1989 rom-com starring Meg Ryan merges with a 1998 Spielberg WWII epic?",
+    "answer": "When Harry Met Saving Private Ryan",
+    "options": ["Sleepless in Seattle in Black", "You've Got Mail on Sunday", "French Kiss the Girls"]
+  },
+  {
+    "category": "Before & After",
+    "question": "What 1999 psychological thriller starring Bruce Willis merges with a 1995 Jane Austen adaptation starring Emma Thompson?",
+    "answer": "The Sixth Sense and Sensibility",
+    "options": ["Unbreakable Pride and Prejudice", "Split Emma", "Glass Clueless"]
+  },
+  {
+    "category": "Food & Drink",
+    "question": "What classic cocktail consists of rye whiskey, sweet vermouth, and bitters, traditionally garnished with a Maraschino cherry?",
+    "answer": "Manhattan",
+    "options": ["Old Fashioned", "Negroni", "Boulevardier"]
+  },
+  {
+    "category": "NYC Landmarks",
+    "question": "Which NYC museum is housed in the New York City Building, the only surviving pavilion from the 1939 World's Fair?",
+    "answer": "Queens Museum",
+    "options": ["Brooklyn Museum", "New York Hall of Science", "Museum of the Moving Image"]
+  },
+  {
+    "category": "Pop Culture: TV",
+    "question": "Which NYC-based comedy show featured characters like Liz Lemon, Jack Donaghy, and Kenneth Parcell?",
+    "answer": "30 Rock",
+    "options": ["Parks and Recreation", "The Office", "Brooklyn Nine-Nine"]
+  },
+  {
+    "category": "NYC Landmarks",
+    "question": "What iconic music venue is located at 126th Street in Harlem and is famous for its Amateur Night?",
+    "answer": "Apollo Theater",
+    "options": ["Beacon Theatre", "Radio City Music Hall", "Carnegie Hall"]
+  },
+  {
+    "category": "General Knowledge",
+    "question": "What was the name of the first artificial Earth satellite, launched by the Soviet Union in 1957?",
+    "answer": "Sputnik 1",
+    "options": ["Vostok 1", "Explorer 1", "Mir"]
+  },
+  {
+    "category": "Before & After",
+    "question": "What 1993 dinosaur blockbuster merges with a 2004 NBC workplace mockumentary starring Steve Carell?",
+    "answer": "Jurassic Park and Recreation",
+    "options": ["The Lost World's End", "Jurassic World War Z", "Jurassic Park The Office"]
+  },
+  {
+    "category": "Pop Culture: Music",
+    "question": "Which famous NYC punk band was formed in Forest Hills, Queens in 1974, with all members adopting the same last name?",
+    "answer": "The Ramones",
+    "options": ["The New York Dolls", "Talking Heads", "Blondie"]
+  },
+  {
+    "category": "Pop Culture: Film",
+    "question": "What 1976 Martin Scorsese film stars Robert De Niro as an insomniac Vietnam veteran driving the streets of NYC?",
+    "answer": "Taxi Driver",
+    "options": ["Raging Bull", "Mean Streets", "Goodfellas"]
+  },
+  {
+    "category": "NYC History",
+    "question": "What NYC neighborhood was famous in the late 19th and early 20th centuries as a dense, working-class enclave of Eastern European Jewish immigrants?",
+    "answer": "The Lower East Side",
+    "options": ["Hell's Kitchen", "Greenwich Village", "Tribeca"]
+  },
+  {
+    "category": "NYC History",
+    "question": "Which bridge was the first steel-wire suspension bridge constructed, opening in 1883?",
+    "answer": "Brooklyn Bridge",
+    "options": ["Manhattan Bridge", "Williamsburg Bridge", "George Washington Bridge"]
+  },
+  {
+    "category": "Pop Culture: TV",
+    "question": "In what NYC neighborhood do the main characters of 'Broad City' (Abbi and Ilana) frequently cause chaos?",
+    "answer": "Astoria/Gowanus (Various)",
+    "options": ["Upper East Side", "Tribeca", "Staten Island"]
+  },
+  {
+    "category": "Science & Nature",
+    "question": "What element has the chemical symbol 'W' and the highest melting point of all discovered metals?",
+    "answer": "Tungsten",
+    "options": ["Platinum", "Titanium", "Gold"]
+  },
+  {
+    "category": "General Knowledge",
+    "question": "Who wrote the classic dystopian novel '1984'?",
+    "answer": "George Orwell",
+    "options": ["Aldous Huxley", "Ray Bradbury", "H.G. Wells"]
+  },
+  {
+    "category": "Before & After",
+    "question": "What 2017 Pixar movie about the Day of the Dead merges with a 2017 Disney animated film about a Polynesian voyager?",
+    "answer": "Coco Moana",
+    "options": ["Encanto Tangled", "Soul Frozen", "Up Inside Out"]
+  },
+  {
+    "category": "Pop Culture: Music",
+    "question": "Which legendary hip hop group released the 1993 debut album 'Enter the Wu-Tang (36 Chambers)', originating from Staten Island?",
+    "answer": "Wu-Tang Clan",
+    "options": ["A Tribe Called Quest", "Public Enemy", "De La Soul"]
+  },
+  {
+    "category": "Food & Drink",
+    "question": "What iconic NYC street food involves a hot dog, bun, and is traditionally associated with Nathan's Famous in Coney Island?",
+    "answer": "Coney Island Hot Dog",
+    "options": ["Street Meat", "Knish", "Pretzel"]
+  },
+  {
+    "category": "NYC Geography",
+    "question": "Which NYC avenue is known as the 'Avenue of the Americas'?",
+    "answer": "Sixth Avenue",
+    "options": ["Fifth Avenue", "Seventh Avenue", "Lexington Avenue"]
+  },
+  {
+    "category": "NYC Geography",
+    "question": "What is the name of the narrow body of water separating Manhattan from Queens and Brooklyn?",
+    "answer": "The East River",
+    "options": ["The Hudson River", "The Harlem River", "The Bronx River"]
+  },
+  {
+    "category": "Pop Culture: Film",
+    "question": "In 'Spider-Man' (2002), what is Peter Parker's neighborhood in Queens?",
+    "answer": "Forest Hills",
+    "options": ["Astoria", "Jackson Heights", "Flushing"]
+  },
+  {
+    "category": "General Knowledge",
+    "question": "What artist famously painted 'The Starry Night' while in an asylum in Saint-Rémy-de-Provence?",
+    "answer": "Vincent van Gogh",
+    "options": ["Claude Monet", "Pablo Picasso", "Salvador Dalí"]
+  },
+  {
+    "category": "Pop Culture: Music",
+    "question": "What 1980s pop icon famously lived at the Dakota apartment building in NYC?",
+    "answer": "John Lennon",
+    "options": ["David Bowie", "Madonna", "Prince"]
+  },
+  {
+    "category": "Pop Culture: TV",
+    "question": "What late-night comedy show has broadcast live from 30 Rockefeller Plaza since 1975?",
+    "answer": "Saturday Night Live (SNL)",
+    "options": ["The Tonight Show", "Late Night with David Letterman", "The Daily Show"]
+  },
+  {
+    "category": "NYC Local Flavor",
+    "question": "What annual event in NYC culminates in a ball drop in Times Square on December 31st?",
+    "answer": "New Year's Eve",
+    "options": ["Thanksgiving", "Christmas", "Fourth of July"]
+  },
+  {
+    "category": "Before & After",
+    "question": "What 2003 Christmas comedy starring Will Ferrell merges with a 1999 David Fincher film about an underground fighting ring?",
+    "answer": "Elf Fight Club",
+    "options": ["The Santa Clause Seven", "Bad Santa Zodiac", "Home Alone The Game"]
+  },
+  {
+    "category": "NYC Geography",
+    "question": "What small island in New York Harbor is home to the Statue of Liberty?",
+    "answer": "Liberty Island",
+    "options": ["Ellis Island", "Staten Island", "Governors Island"]
+  },
+  {
+    "category": "Pop Culture: Music",
+    "question": "Which famous NYC music festival takes place annually on Randall's Island?",
+    "answer": "Governors Ball",
+    "options": ["Lollapalooza", "Coachella", "Bonnaroo"]
+  },
+  {
+    "category": "Science & Nature",
+    "question": "What planet in our solar system is known as the 'Red Planet'?",
+    "answer": "Mars",
+    "options": ["Venus", "Jupiter", "Saturn"]
+  },
+  {
+    "category": "Science & Nature",
+    "question": "What is the hardest naturally occurring substance on Earth?",
+    "answer": "Diamond",
+    "options": ["Graphene", "Quartz", "Topaz"]
+  },
+  {
+    "category": "General Knowledge",
+    "question": "Who was the first woman to fly solo across the Atlantic Ocean?",
+    "answer": "Amelia Earhart",
+    "options": ["Bessie Coleman", "Harriet Quimby", "Jacqueline Cochran"]
+  },
+  {
+    "category": "Pop Culture: Film",
+    "question": "In 'The Avengers' (2012), the climactic battle against the Chitauri takes place in which NYC borough?",
+    "answer": "Manhattan",
+    "options": ["Brooklyn", "Queens", "The Bronx"]
+  },
+  {
+    "category": "NYC History",
+    "question": "What was the name of the political machine that controlled New York City politics for much of the 19th century, led by 'Boss' Tweed?",
+    "answer": "Tammany Hall",
+    "options": ["The Five Points", "The Bowery Boys", "The Dead Rabbits"]
+  },
+  {
+    "category": "Before & After",
+    "question": "What 2014 Keanu Reeves action film merges with a 2004 cult comedy starring Jon Heder as an awkward teenager?",
+    "answer": "John Wick Napoleon Dynamite",
+    "options": ["The Matrix Reloaded Superbad", "Speed Scott Pilgrim", "Point Break Mean Girls"]
+  },
+  {
+    "category": "Pop Culture: TV",
+    "question": "In 'How I Met Your Mother', what is the name of the pub where the main characters frequently hang out?",
+    "answer": "MacLaren's Pub",
+    "options": ["Central Perk", "Puzzles", "The Drunken Clam"]
+  },
+  {
+    "category": "General Knowledge",
+    "question": "What is the capital of Canada?",
+    "answer": "Ottawa",
+    "options": ["Toronto", "Montreal", "Vancouver"]
+  },
+  {
+    "category": "General Knowledge",
+    "question": "In what year did the Titanic sink?",
+    "answer": "1912",
+    "options": ["1905", "1915", "1921"]
+  },
+  {
+    "category": "Food & Drink",
+    "question": "What NYC dessert, made of a black-and-white half-moon frosted cookie, was made famous by a Seinfeld episode?",
+    "answer": "Black and White Cookie",
+    "options": ["New York Cheesecake", "Cannoli", "Babka"]
+  },
+  {
+    "category": "NYC Landmarks",
+    "question": "What major NYC train station, located in Midtown Manhattan, was largely demolished in 1963, leading to the creation of the Landmarks Preservation Commission?",
+    "answer": "Pennsylvania Station (original)",
+    "options": ["Grand Central Terminal", "Moynihan Train Hall", "Hoboken Terminal"]
+  },
+  {
+    "category": "Pop Culture: Music",
+    "question": "What famous NYC club, located in Manhattan, was the epicenter of disco in the late 1970s?",
+    "answer": "Studio 54",
+    "options": ["The Limelight", "Paradise Garage", "Copacabana"]
+  },
+  {
+    "category": "Before & After",
+    "question": "What 1994 Quentin Tarantino film merges with a 1994 Tom Hanks film about a man who loves chocolates and running?",
+    "answer": "Pulp Fiction Forrest Gump",
+    "options": ["Reservoir Dogs Big", "Kill Bill Cast Away", "Jackie Brown Apollo 13"]
+  },
+  {
+    "category": "Science & Nature",
+    "question": "What is the largest organ of the human body?",
+    "answer": "The Skin",
+    "options": ["The Liver", "The Brain", "The Heart"]
+  },
+  {
+    "category": "Pop Culture: TV",
+    "question": "What fictional ad agency does Don Draper work for at the beginning of 'Mad Men'?",
+    "answer": "Sterling Cooper",
+    "options": ["Ogilvy & Mather", "McCann Erickson", "SCDP"]
+  },
+  {
+    "category": "NYC History",
+    "question": "What year did the terrorist attacks on the World Trade Center occur?",
+    "answer": "2001",
+    "options": ["1999", "2000", "2002"]
+  },
+  {
+    "category": "NYC Landmarks",
+    "question": "What NYC park contains the Bethesda Terrace and Fountain?",
+    "answer": "Central Park",
+    "options": ["Prospect Park", "Washington Square Park", "Bryant Park"]
+  },
+  {
+    "category": "General Knowledge",
+    "question": "Who painted the ceiling of the Sistine Chapel?",
+    "answer": "Michelangelo",
+    "options": ["Leonardo da Vinci", "Raphael", "Donatello"]
+  },
+  {
+    "category": "Before & After",
+    "question": "What 2001 wizarding film merges with a 1988 Bruce Willis Christmas action movie?",
+    "answer": "Harry Potter and the Sorcerer's Stone Die Hard",
+    "options": ["The Lord of the Rings Lethal Weapon", "Spider-Man The Terminator", "X-Men First Blood"]
+  },
+  {
+    "category": "Food & Drink",
+    "question": "What Italian neighborhood in the Bronx is widely considered to have better, more authentic Italian food than Manhattan's Little Italy?",
+    "answer": "Arthur Avenue (Belmont)",
+    "options": ["Bensonhurst", "Carroll Gardens", "Howard Beach"]
+  },
+  {
+    "category": "NYC Local Flavor",
+    "question": "What is the name of the annual hot dog eating contest held on July 4th in Coney Island?",
+    "answer": "Nathan's Hot Dog Eating Contest",
+    "options": ["Coney Island Gluttony Fest", "The Great American Bite", "Brooklyn Wiener Nationals"]
+  }
+]
