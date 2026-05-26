@@ -1,4 +1,5 @@
 import type { UserVocabulary, VocabularyCard } from '../types';
+import { syncToCloud } from './sync';
 
 const STORAGE_KEYS = {
   TRIVIA_PROGRESS: 'nyc-trivia-progress',
@@ -28,6 +29,9 @@ export function getFromStorage<T>(key: string, defaultValue: T): T {
 export function setToStorage<T>(key: string, value: T): void {
   try {
     localStorage.setItem(key, JSON.stringify(value));
+    
+    // Asynchronously push this update to Supabase so it's persisted in the cloud
+    syncToCloud().catch(err => console.error("Cloud sync failed:", err));
   } catch (error) {
     console.error(`Error writing to localStorage key "${key}":`, error);
   }

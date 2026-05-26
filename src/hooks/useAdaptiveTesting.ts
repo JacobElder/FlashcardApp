@@ -66,8 +66,8 @@ export function useAdaptiveTesting({
 
   // Select the next card using IRT maximum information
   const currentSelection = useMemo(() => {
-    return selectNextCard(irtProfile.ability, availableCards);
-  }, [irtProfile.ability, availableCards]);
+    return selectNextCard(irtProfile.ability, availableCards, irtProfile.cardHistory);
+  }, [irtProfile.ability, availableCards, irtProfile.cardHistory]);
 
   const currentCard = currentSelection?.card ?? null;
   const currentFormat = currentSelection?.format ?? 'open';
@@ -118,17 +118,34 @@ export function useAdaptiveTesting({
     );
 
     const historyKey = currentFormat === 'mc' ? `${currentCard.id}-mc` : currentCard.id;
-    const history = irtProfile.cardHistory[historyKey] || { cardId: historyKey, timesAnswered: 0, timesCorrect: 0 };
+    const history = irtProfile.cardHistory[historyKey] || { cardId: historyKey, timesAnswered: 0, timesCorrect: 0, leitnerBox: 0 };
+    
+    // Leitner Box Logic
+    let newBox = history.leitnerBox || 0;
+    if (isCorrect) {
+      newBox = Math.min(5, newBox + 1);
+    } else {
+      newBox = 0;
+    }
+    
+    const boxIntervals = [0, 1, 3, 7, 14, 30]; // Days
+    const nextReview = new Date();
+    nextReview.setDate(nextReview.getDate() + boxIntervals[newBox]);
+    
+    const newHistoryEntry = { date: new Date().toISOString(), ability: newAbility };
     
     const newProfile: IRTProfile = {
       ability: newAbility,
+      abilityHistory: [...(irtProfile.abilityHistory || []), newHistoryEntry],
       cardHistory: {
         ...irtProfile.cardHistory,
         [historyKey]: {
           cardId: historyKey,
           timesAnswered: history.timesAnswered + 1,
           timesCorrect: history.timesCorrect + (isCorrect ? 1 : 0),
-          lastAnsweredDate: new Date().toISOString()
+          lastAnsweredDate: new Date().toISOString(),
+          leitnerBox: newBox,
+          nextReviewDate: nextReview.toISOString()
         }
       }
     };

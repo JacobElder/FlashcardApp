@@ -14,7 +14,12 @@
     "type": "git",
     "url": "git+https://github.com/JacobElder/NYCTriviaApp.git"
   },
-  "keywords": ["trivia", "flashcards", "spaced-repetition", "pwa"],
+  "keywords": [
+    "trivia",
+    "flashcards",
+    "spaced-repetition",
+    "pwa"
+  ],
   "author": "",
   "license": "ISC",
   "bugs": {
@@ -22,8 +27,10 @@
   },
   "homepage": "https://github.com/JacobElder/NYCTriviaApp#readme",
   "dependencies": {
+    "@supabase/supabase-js": "^2.106.2",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "recharts": "^3.8.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.1",

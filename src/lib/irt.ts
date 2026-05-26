@@ -1,4 +1,4 @@
-import type { FlashCard } from '../types';
+import type { FlashCard, IRTCardHistory } from '../types';
 
 /**
  * Item Response Theory (IRT) - 2PL Model
@@ -65,13 +65,42 @@ export function updateAbility(
 }
 
 /**
+ * Calculate Leitner time-based multiplier
+ * Items past their review date get higher priority.
+ * Items recently reviewed get drastically reduced priority.
+ */
+function calculateLeitnerMultiplier(history: IRTCardHistory | undefined): number {
+  if (!history || history.leitnerBox === undefined || !history.nextReviewDate) {
+    return 1.5; // New cards get a slight priority boost
+  }
+  
+  const now = new Date().getTime();
+  const nextReview = new Date(history.nextReviewDate).getTime();
+  
+  // If we haven't reached the review date, severely penalize priority
+  if (now < nextReview) {
+    return 0.1;
+  }
+  
+  // If past due, increase priority based on how overdue it is
+  // Max multiplier of 3.0
+  const daysOverdue = (now - nextReview) / (1000 * 60 * 60 * 24);
+  return Math.min(3.0, 1.0 + (daysOverdue * 0.1));
+}
+
+/**
  * Select the best next card to show based on maximum information.
  * 
  * @param userAbility Current user ability
  * @param availableCards Array of cards to choose from
+ * @param cardHistory User's history to apply Leitner spacing
  * @returns The card that maximizes information gain
  */
-export function selectNextCard(userAbility: number, availableCards: FlashCard[]): { card: FlashCard, format: 'open' | 'mc' } | null {
+export function selectNextCard(
+  userAbility: number,
+  availableCards: FlashCard[],
+  cardHistory: Record<string, IRTCardHistory>
+): { card: FlashCard, format: 'open' | 'mc' } | null {
   if (availableCards.length === 0) return null;
 
   let bestCard = availableCards[0];
@@ -79,10 +108,16 @@ export function selectNextCard(userAbility: number, availableCards: FlashCard[])
   let maxInfo = -1;
 
   for (const card of availableCards) {
+    const historyOpen = cardHistory[card.id];
+    const historyMC = cardHistory[`${card.id}-mc`];
+    
     // 1. Calculate Information for Open-Ended Format
     const diffOpen = card.difficulty ?? 0;
     const discOpen = card.discrimination ?? 1.0;
-    const infoOpen = calculateInformation(userAbility, diffOpen, discOpen);
+    let infoOpen = calculateInformation(userAbility, diffOpen, discOpen);
+    
+    // Apply Leitner Multiplier
+    infoOpen *= calculateLeitnerMultiplier(historyOpen);
     
     // Add small random noise to break ties
     const noiseOpen = Math.random() * 0.001;
@@ -97,7 +132,9 @@ export function selectNextCard(userAbility: number, availableCards: FlashCard[])
       // Fallback to slightly easier params if missing explicit mc parameters
       const diffMC = card.mcDifficulty ?? (diffOpen - 1.5);
       const discMC = card.mcDiscrimination ?? (discOpen * 0.8);
-      const infoMC = calculateInformation(userAbility, diffMC, discMC);
+      let infoMC = calculateInformation(userAbility, diffMC, discMC);
+      
+      infoMC *= calculateLeitnerMultiplier(historyMC);
       
       const noiseMC = Math.random() * 0.001;
       if (infoMC + noiseMC > maxInfo) {

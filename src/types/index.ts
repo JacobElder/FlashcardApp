@@ -35,11 +35,14 @@ export interface IRTCardHistory {
   timesAnswered: number;
   timesCorrect: number;
   lastAnsweredDate?: string;
+  leitnerBox?: number;
+  nextReviewDate?: string;
 }
 
 export interface IRTProfile {
   ability: number;
   cardHistory: Record<string, IRTCardHistory>;
+  abilityHistory?: { date: string; ability: number }[];
 }
 
 // Rating values for SM-2
@@ -84,7 +87,7 @@ export interface StudySession {
 }
 
 // Tab types
-export type TabType = 'trivia' | 'vocabulary';
+export type TabType = 'trivia' | 'vocabulary' | 'analytics';
 
 // Form data for adding new vocabulary
 export interface NewWordFormData {
