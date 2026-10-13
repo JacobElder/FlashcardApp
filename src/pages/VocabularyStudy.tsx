@@ -4,26 +4,59 @@ import { RatingButtons } from '../components/RatingButtons';
 import { ProgressBar } from '../components/ProgressBar';
 import { EmptyState } from '../components/EmptyState';
 import { AddWordModal } from '../components/AddWordModal';
+import { MyWordsList } from '../components/MyWordsList';
+import { SessionSummary } from '../components/SessionSummary';
 import { useAdaptiveTesting } from '../hooks/useAdaptiveTesting';
+import { useStorageValue } from '../hooks/useStorageValue';
+import { useStudyShortcuts } from '../hooks/useStudyShortcuts';
 import { vocabularyCards } from '../data/vocabularyCards';
-import { getUserVocabulary, addUserWord } from '../lib/storage';
+import {
+  STORAGE_KEYS,
+  addUserWord,
+  deleteUserWord,
+  EMPTY_VOCABULARY,
+  updateUserWord,
+} from '../lib/storage';
 import type { VocabularyCard, NewWordFormData } from '../types';
 
-const STORAGE_KEY = 'nyc-vocabulary-progress';
-
 function generateId(): string {
-  return `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  return `user-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 }
 
-export function VocabularyStudy() {
+function toCardFields(data: NewWordFormData) {
+  return {
+    word: data.word,
+    definition: data.definition,
+    partOfSpeech: data.partOfSpeech,
+    example: data.example,
+    front: data.word,
+    back: data.definition + (data.example ? `\n\nExample: "${data.example}"` : ''),
+  };
+}
+
+interface VocabularyStudyProps {
+  /** Whether this tab is visible (keyboard shortcuts only apply then). */
+  isActive: boolean;
+}
+
+export function VocabularyStudy({ isActive }: VocabularyStudyProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [editingWord, setEditingWord] = useState<VocabularyCard | null>(null);
+  const [showMyWords, setShowMyWords] = useState(false);
+  const userVocabulary = useStorageValue(STORAGE_KEYS.USER_VOCABULARY, EMPTY_VOCABULARY);
 
   // Combine bundled and user vocabulary
-  const allCards = useMemo(() => {
-    const userVocab = getUserVocabulary();
-    return [...vocabularyCards, ...userVocab.words];
-  }, [refreshKey]);
+  const allCards = useMemo(
+    () => [...vocabularyCards, ...userVocabulary.words].map(card => ({ ...card, category: 'Vocabulary' })),
+    [userVocabulary.words]
+  );
+
+  const existingWords = useMemo(
+    () => allCards
+      .filter(card => card.id !== editingWord?.id)
+      .map(card => card.word.trim().toLowerCase()),
+    [allCards, editingWord]
+  );
 
   const {
     currentCard,
@@ -33,30 +66,38 @@ export function VocabularyStudy() {
     skipCard,
     session,
     totalCards,
+    dueCount,
     masteryLevel,
     hasMoreCards,
+    isCaughtUp,
+    studyAhead,
     resetSession,
     userAbility,
   } = useAdaptiveTesting({
     cards: allCards,
-    storageKey: STORAGE_KEY,
+    storageKey: STORAGE_KEYS.VOCABULARY_PROGRESS,
   });
 
-  const handleAddWord = (data: NewWordFormData) => {
-    const newCard: VocabularyCard = {
-      id: generateId(),
-      type: 'vocabulary',
-      word: data.word,
-      definition: data.definition,
-      partOfSpeech: data.partOfSpeech,
-      example: data.example,
-      front: data.word,
-      back: data.definition + (data.example ? `\n\nExample: "${data.example}"` : ''),
-      isUserAdded: true,
-    };
+  useStudyShortcuts({
+    enabled: isActive && hasMoreCards && !isModalOpen,
+    canFlip: true,
+    isFlipped,
+    onFlip: flipCard,
+    onRate: rateCard,
+    onSkip: skipCard,
+  });
 
-    addUserWord(newCard);
-    setRefreshKey((k) => k + 1);
+  const openAddModal = () => {
+    setEditingWord(null);
+    setIsModalOpen(true);
+  };
+
+  const handleSaveWord = (data: NewWordFormData) => {
+    if (editingWord) {
+      updateUserWord(editingWord.id, toCardFields(data));
+    } else {
+      addUserWord({ id: generateId(), type: 'vocabulary', isUserAdded: true, ...toCardFields(data) });
+    }
   };
 
   return (
@@ -66,7 +107,8 @@ export function VocabularyStudy() {
         <div className="flex justify-between items-center">
           <h1 className="text-xl font-bold text-white">Vocabulary Study</h1>
           <button
-            onClick={() => setIsModalOpen(true)}
+            type="button"
+            onClick={openAddModal}
             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
           >
             <svg
@@ -74,6 +116,7 @@ export function VocabularyStudy() {
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
+              aria-hidden="true"
             >
               <path
                 strokeLinecap="round"
@@ -96,7 +139,7 @@ export function VocabularyStudy() {
       </header>
 
       {/* Stats */}
-      <div className="flex justify-center gap-6 py-4 px-4 border-b border-slate-800">
+      <div className="flex justify-center gap-6 py-4 px-4 border-b border-slate-800 flex-wrap">
         <div className="text-center">
           <p className="text-2xl font-bold text-purple-400">{userAbility.toFixed(2)}</p>
           <p className="text-xs text-slate-400">Ability (θ)</p>
@@ -106,25 +149,56 @@ export function VocabularyStudy() {
           <p className="text-xs text-slate-400">Total Cards</p>
         </div>
         <div className="text-center">
+          <p className="text-2xl font-bold text-sky-400">{dueCount}</p>
+          <p className="text-xs text-slate-400">Due / New</p>
+        </div>
+        <div className="text-center">
           <p className="text-2xl font-bold text-amber-400">
             {session.cardsReviewed}
           </p>
           <p className="text-xs text-slate-400">Reviewed</p>
         </div>
+        <button
+          type="button"
+          onClick={() => setShowMyWords(prev => !prev)}
+          aria-expanded={showMyWords}
+          className="text-xs px-3 py-1 rounded-full font-medium self-center bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
+        >
+          My Words ({userVocabulary.words.length})
+        </button>
       </div>
+
+      {showMyWords && (
+        <MyWordsList
+          words={userVocabulary.words}
+          onEdit={(word) => {
+            setEditingWord(word);
+            setIsModalOpen(true);
+          }}
+          onDelete={(word) => deleteUserWord(word.id)}
+        />
+      )}
 
       {/* Main Content */}
       <main className="px-4 py-6">
         {!hasMoreCards ? (
-          <EmptyState
-            title="All Done!"
-            description="You've reviewed all vocabulary for today. Add new words or come back tomorrow!"
-            icon="check"
-            action={{
-              label: 'Review Again',
-              onClick: resetSession,
-            }}
-          />
+          session.cardsReviewed > 0 ? (
+            <SessionSummary session={session} onReset={resetSession} />
+          ) : isCaughtUp && totalCards > 0 ? (
+            <EmptyState
+              title="All Caught Up!"
+              description="No vocabulary is due for review. Add new words, come back later, or study ahead."
+              icon="check"
+              action={{ label: 'Study Ahead', onClick: studyAhead }}
+            />
+          ) : (
+            <EmptyState
+              title="No Cards Yet"
+              description="Add your first vocabulary word to start studying!"
+              icon="add"
+              action={{ label: 'Add Word', onClick: openAddModal }}
+            />
+          )
         ) : currentCard ? (
           <div className="space-y-6">
             <FlashCard
@@ -135,8 +209,10 @@ export function VocabularyStudy() {
 
             <div className="flex justify-center">
               <button
+                type="button"
                 onClick={skipCard}
-                className="text-slate-500 hover:text-slate-300 text-sm transition-colors"
+                className="text-slate-400 hover:text-slate-200 text-sm transition-colors"
+                aria-keyshortcuts="S"
               >
                 Skip
               </button>
@@ -160,24 +236,19 @@ export function VocabularyStudy() {
               </div>
             )}
           </div>
-        ) : (
-          <EmptyState
-            title="No Cards Yet"
-            description="Add your first vocabulary word to start studying!"
-            icon="add"
-            action={{
-              label: 'Add Word',
-              onClick: () => setIsModalOpen(true),
-            }}
-          />
-        )}
+        ) : null}
       </main>
 
-      {/* Add Word Modal */}
+      {/* Add / Edit Word Modal */}
       <AddWordModal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        onAdd={handleAddWord}
+        initialData={editingWord ?? undefined}
+        existingWords={existingWords}
+        onClose={() => {
+          setIsModalOpen(false);
+          setEditingWord(null);
+        }}
+        onSave={handleSaveWord}
       />
     </div>
   );

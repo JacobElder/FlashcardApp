@@ -3,14 +3,17 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
-export default defineConfig({
-  base: '/',
+// GitHub Pages serves this repo at https://jacobelder.github.io/FlashcardApp/
+const PAGES_BASE = '/FlashcardApp/'
+
+export default defineConfig(({ command }) => ({
+  base: command === 'build' ? PAGES_BASE : '/',
   plugins: [
     react(),
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+      includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'NYC Trivia Study App',
         short_name: 'NYC Trivia',
@@ -19,6 +22,8 @@ export default defineConfig({
         background_color: '#0f172a',
         display: 'standalone',
         orientation: 'portrait',
+        scope: PAGES_BASE,
+        start_url: PAGES_BASE,
         icons: [
           {
             src: 'pwa-192x192.png',
@@ -63,5 +68,7 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
+    // Fixed zone west of UTC so local-vs-UTC date bugs show up on any machine
+    env: { TZ: 'America/New_York' },
   }
-})
+}))

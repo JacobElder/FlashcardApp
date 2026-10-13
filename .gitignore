@@ -3,3 +3,5 @@ dist/
 .DS_Store
 .claude/
 *.local
+__pycache__/
+*.pyc

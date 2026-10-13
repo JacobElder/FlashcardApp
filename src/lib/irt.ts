@@ -1,149 +1,229 @@
-import type { FlashCard, IRTCardHistory } from '../types';
+import type { CardFormat, FlashCard, IRTCardHistory, IRTProfile } from '../types';
 
 /**
- * Item Response Theory (IRT) - 2PL Model
+ * Item Response Theory (IRT) - 2PL model for open recall, 3PL (with a
+ * guessing floor) for multiple choice.
  */
 
+export const MIN_ABILITY = -4;
+export const MAX_ABILITY = 4;
+/** Information contributed by the N(0, 1) prior on ability. */
+const PRIOR_INFO = 1;
+/** Floor on the ability step so the estimate can still track real learning. */
+const MIN_ABILITY_STEP = 0.05;
+/** How far an MC card's difficulty sits below its open-recall difficulty when not authored. */
+const MC_DIFFICULTY_OFFSET = 0.5;
+/** Recognition (MC) alone can't schedule a card further out than this Leitner box. */
+export const MC_BOX_CAP = 2;
+/** Review interval in days for each Leitner box. */
+export const BOX_INTERVAL_DAYS = [0, 1, 3, 7, 14, 30];
+export const MAX_BOX = BOX_INTERVAL_DAYS.length - 1;
+
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+export interface ItemParams {
+  difficulty: number;
+  discrimination: number;
+  /** Lower asymptote: the chance of answering correctly by guessing. */
+  guessing: number;
+}
+
 /**
- * Calculate probability of a correct response using the 2PL model
- * P(theta) = 1 / (1 + exp(-a * (theta - b)))
- * 
- * @param ability User's latent ability (theta)
- * @param difficulty Item difficulty (b)
- * @param discrimination Item discrimination (a)
- * @returns Probability between 0 and 1
+ * Probability of a correct response.
+ * P(theta) = c + (1 - c) / (1 + exp(-a * (theta - b)))
  */
 export function calculateProbability(
   ability: number,
   difficulty: number,
-  discrimination: number = 1.0
+  discrimination: number = 1.0,
+  guessing: number = 0
 ): number {
-  return 1 / (1 + Math.exp(-discrimination * (ability - difficulty)));
+  return guessing + (1 - guessing) / (1 + Math.exp(-discrimination * (ability - difficulty)));
 }
 
 /**
- * Information function for a specific item given the user's ability.
- * Maximum information is obtained when item difficulty matches user ability.
- * I(theta) = a^2 * P(theta) * (1 - P(theta))
+ * Fisher information of an item at the given ability. For c = 0 this is the
+ * 2PL a^2 * P * (1 - P); the 3PL form discounts information lost to guessing.
  */
 export function calculateInformation(
   ability: number,
   difficulty: number,
-  discrimination: number = 1.0
+  discrimination: number = 1.0,
+  guessing: number = 0
 ): number {
-  const p = calculateProbability(ability, difficulty, discrimination);
-  return Math.pow(discrimination, 2) * p * (1 - p);
+  const p = calculateProbability(ability, difficulty, discrimination, guessing);
+  return discrimination ** 2 * ((p - guessing) ** 2 / (1 - guessing) ** 2) * ((1 - p) / p);
+}
+
+export interface AbilityEstimate {
+  ability: number;
+  /** Accumulated information (prior + all answered items). */
+  info: number;
+}
+
+/** Starting information for a profile saved before `abilityInfo` was tracked. */
+export function initialAbilityInfo(profile: IRTProfile): number {
+  if (profile.abilityInfo !== undefined) return profile.abilityInfo;
+  const answered = Object.values(profile.cardHistory).reduce((n, h) => n + h.timesAnswered, 0);
+  return PRIOR_INFO + 0.2 * answered;
 }
 
 /**
- * Updates user ability using Maximum Likelihood Estimation (MLE) approach via gradient descent
- * new_theta = old_theta + (actual - predicted) * step_size
- * 
- * @param currentAbility Current theta estimate
- * @param difficulty Item difficulty (b)
- * @param discrimination Item discrimination (a)
- * @param isCorrect Whether the user answered correctly
- * @param stepSize Learning rate for the update
+ * One Fisher-scoring step on ability. The step is 1 / accumulated information,
+ * so early answers move the estimate a lot and later ones refine it.
  */
 export function updateAbility(
-  currentAbility: number,
-  difficulty: number,
-  discrimination: number = 1.0,
-  isCorrect: boolean,
-  stepSize: number = 0.5
-): number {
-  const predicted = calculateProbability(currentAbility, difficulty, discrimination);
+  estimate: AbilityEstimate,
+  item: ItemParams,
+  isCorrect: boolean
+): AbilityEstimate {
+  const { difficulty: b, discrimination: a, guessing: c } = item;
+  const p = calculateProbability(estimate.ability, b, a, c);
   const actual = isCorrect ? 1 : 0;
-  
-  // Gradient step
-  const update = discrimination * (actual - predicted) * stepSize;
-  
-  // Bound the ability score to prevent extreme values (e.g., -4 to 4)
-  const newAbility = Math.max(-4, Math.min(4, currentAbility + update));
-  
-  return newAbility;
+
+  // d/dtheta of the log-likelihood (reduces to a * (u - p) for c = 0)
+  const score = (a * (actual - p) * (p - c)) / (p * (1 - c));
+  const info = estimate.info + calculateInformation(estimate.ability, b, a, c);
+  const step = Math.max(MIN_ABILITY_STEP, 1 / info);
+
+  return {
+    ability: clamp(estimate.ability + step * score, MIN_ABILITY, MAX_ABILITY),
+    info,
+  };
 }
 
 /**
- * Calculate Leitner time-based multiplier
- * Items past their review date get higher priority.
- * Items recently reviewed get drastically reduced priority.
+ * Elo-style difficulty calibration: a card answered worse than predicted gets
+ * harder, better than predicted gets easier. The step shrinks as the card
+ * accumulates answers.
  */
-function calculateLeitnerMultiplier(history: IRTCardHistory | undefined): number {
-  if (!history || history.leitnerBox === undefined || !history.nextReviewDate) {
-    return 1.5; // New cards get a slight priority boost
+export function updateItemDifficulty(
+  ability: number,
+  item: ItemParams,
+  isCorrect: boolean,
+  timesAnswered: number
+): number {
+  const p = calculateProbability(ability, item.difficulty, item.discrimination, item.guessing);
+  const k = Math.max(0.05, 0.4 / (1 + 0.2 * timesAnswered));
+  return clamp(item.difficulty + k * (p - (isCorrect ? 1 : 0)), MIN_ABILITY, MAX_ABILITY);
+}
+
+/** Mean authored difficulty per category, used for cards that have none. */
+export function buildDifficultyPriors(cards: FlashCard[]): Record<string, number> {
+  const sums: Record<string, { total: number; n: number }> = {};
+  for (const card of cards) {
+    if (card.difficulty === undefined) continue;
+    const key = card.category ?? '';
+    sums[key] ??= { total: 0, n: 0 };
+    sums[key].total += card.difficulty;
+    sums[key].n += 1;
   }
-  
-  const now = new Date().getTime();
-  const nextReview = new Date(history.nextReviewDate).getTime();
-  
-  // If we haven't reached the review date, severely penalize priority
-  if (now < nextReview) {
-    return 0.1;
+  return Object.fromEntries(Object.entries(sums).map(([k, { total, n }]) => [k, total / n]));
+}
+
+export function getItemParams(
+  card: FlashCard,
+  history: IRTCardHistory | undefined,
+  format: CardFormat,
+  priors: Record<string, number> = {}
+): ItemParams {
+  const openDifficulty = history?.estDifficulty ?? card.difficulty ?? priors[card.category ?? ''] ?? 0;
+  const openDiscrimination = card.discrimination ?? 1.0;
+  if (format === 'open') {
+    return { difficulty: openDifficulty, discrimination: openDiscrimination, guessing: 0 };
   }
-  
-  // If past due, increase priority based on how overdue it is
-  // Max multiplier of 3.0
-  const daysOverdue = (now - nextReview) / (1000 * 60 * 60 * 24);
-  return Math.min(3.0, 1.0 + (daysOverdue * 0.1));
+  return {
+    difficulty: history?.estMcDifficulty ?? card.mcDifficulty ?? openDifficulty - MC_DIFFICULTY_OFFSET,
+    discrimination: card.mcDiscrimination ?? openDiscrimination * 0.8,
+    guessing: 1 / ((card.options?.length ?? 0) + 1),
+  };
+}
+
+/** A card is due when it has never been answered or its review date has passed. */
+export function isDue(history: IRTCardHistory | undefined, now: number): boolean {
+  if (!history?.nextReviewDate) return true;
+  return new Date(history.nextReviewDate).getTime() <= now;
 }
 
 /**
- * Select the best next card to show based on maximum information.
- * 
- * @param userAbility Current user ability
- * @param availableCards Array of cards to choose from
- * @param cardHistory User's history to apply Leitner spacing
- * @returns The card that maximizes information gain
+ * Scheduling weight: overdue reviews first, then new cards; cards that aren't
+ * due yet (only offered when studying ahead) are heavily discounted.
+ */
+function scheduleMultiplier(history: IRTCardHistory | undefined, now: number): number {
+  if (!history?.nextReviewDate) return 1.0;
+  const nextReview = new Date(history.nextReviewDate).getTime();
+  if (now < nextReview) return 0.1;
+  const daysOverdue = (now - nextReview) / (1000 * 60 * 60 * 24);
+  return Math.min(3.0, 1.5 + daysOverdue * 0.1);
+}
+
+/**
+ * Select the best next card and format: maximum information at the current
+ * ability, weighted by how due the card is.
  */
 export function selectNextCard(
   userAbility: number,
   availableCards: FlashCard[],
-  cardHistory: Record<string, IRTCardHistory>
-): { card: FlashCard, format: 'open' | 'mc' } | null {
+  cardHistory: Record<string, IRTCardHistory>,
+  priors: Record<string, number> = {},
+  now: number = Date.now()
+): { card: FlashCard; format: CardFormat } | null {
   if (availableCards.length === 0) return null;
 
-  let bestCard = availableCards[0];
-  let bestFormat: 'open' | 'mc' = 'open';
-  let maxInfo = -1;
+  let best: { card: FlashCard; format: CardFormat } = { card: availableCards[0], format: 'open' };
+  let maxScore = -1;
 
   for (const card of availableCards) {
-    const historyOpen = cardHistory[card.id];
-    const historyMC = cardHistory[`${card.id}-mc`];
-    
-    // 1. Calculate Information for Open-Ended Format
-    const diffOpen = card.difficulty ?? 0;
-    const discOpen = card.discrimination ?? 1.0;
-    let infoOpen = calculateInformation(userAbility, diffOpen, discOpen);
-    
-    // Apply Leitner Multiplier
-    infoOpen *= calculateLeitnerMultiplier(historyOpen);
-    
-    // Add small random noise to break ties
-    const noiseOpen = Math.random() * 0.001;
-    if (infoOpen + noiseOpen > maxInfo) {
-      maxInfo = infoOpen + noiseOpen;
-      bestCard = card;
-      bestFormat = 'open';
-    }
+    const history = cardHistory[card.id];
+    const multiplier = scheduleMultiplier(history, now);
+    const formats: CardFormat[] = card.options?.length ? ['open', 'mc'] : ['open'];
 
-    // 2. Calculate Information for MC Format (if distractors exist)
-    if (card.options && card.options.length > 0) {
-      // Fallback to slightly easier params if missing explicit mc parameters
-      const diffMC = card.mcDifficulty ?? (diffOpen - 1.5);
-      const discMC = card.mcDiscrimination ?? (discOpen * 0.8);
-      let infoMC = calculateInformation(userAbility, diffMC, discMC);
-      
-      infoMC *= calculateLeitnerMultiplier(historyMC);
-      
-      const noiseMC = Math.random() * 0.001;
-      if (infoMC + noiseMC > maxInfo) {
-        maxInfo = infoMC + noiseMC;
-        bestCard = card;
-        bestFormat = 'mc';
+    for (const format of formats) {
+      const { difficulty, discrimination, guessing } = getItemParams(card, history, format, priors);
+      // Small random noise breaks ties between otherwise identical cards
+      const score =
+        calculateInformation(userAbility, difficulty, discrimination, guessing) * multiplier +
+        Math.random() * 0.001;
+      if (score > maxScore) {
+        maxScore = score;
+        best = { card, format };
       }
     }
   }
 
-  return { card: bestCard, format: bestFormat };
+  return best;
+}
+
+/**
+ * Fold legacy `${id}-mc` history entries (from when MC was scheduled
+ * separately) into the card's single entry. Returns null if nothing changed.
+ */
+export function migrateProfile(profile: IRTProfile): IRTProfile | null {
+  const mcKeys = Object.keys(profile.cardHistory).filter(key => key.endsWith('-mc'));
+  if (mcKeys.length === 0) return null;
+
+  const cardHistory = { ...profile.cardHistory };
+  for (const mcKey of mcKeys) {
+    const mc = cardHistory[mcKey];
+    delete cardHistory[mcKey];
+    const id = mcKey.slice(0, -'-mc'.length);
+    const base = cardHistory[id];
+    cardHistory[id] = base
+      ? {
+          ...base,
+          mcTimesAnswered: (base.mcTimesAnswered ?? 0) + mc.timesAnswered,
+          mcTimesCorrect: (base.mcTimesCorrect ?? 0) + mc.timesCorrect,
+        }
+      : {
+          cardId: id,
+          timesAnswered: 0,
+          timesCorrect: 0,
+          mcTimesAnswered: mc.timesAnswered,
+          mcTimesCorrect: mc.timesCorrect,
+          lastAnsweredDate: mc.lastAnsweredDate,
+          leitnerBox: Math.min(mc.leitnerBox ?? 0, MC_BOX_CAP),
+          nextReviewDate: mc.nextReviewDate,
+        };
+  }
+  return { ...profile, cardHistory };
 }

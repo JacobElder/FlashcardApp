@@ -9,18 +9,22 @@ import {
   ResponsiveContainer,
   ReferenceLine
 } from 'recharts';
-import { getFromStorage } from '../lib/storage';
+import { STORAGE_KEYS } from '../lib/storage';
+import { useStorageValue } from '../hooks/useStorageValue';
 import type { IRTProfile } from '../types';
+
+const EMPTY_PROFILE: IRTProfile = { ability: 0, cardHistory: {} };
 
 export function Analytics() {
   const [activeDeck, setActiveDeck] = useState<'trivia' | 'vocabulary'>('trivia');
-  
-  const profileKey = activeDeck === 'trivia' ? 'nyc-trivia-progress' : 'nyc-vocabulary-progress';
-  const profile = getFromStorage<IRTProfile>(profileKey, { ability: 0, cardHistory: {} });
-  
+
+  const profileKey = activeDeck === 'trivia' ? STORAGE_KEYS.TRIVIA_PROGRESS : STORAGE_KEYS.VOCABULARY_PROGRESS;
+  // Re-renders whenever the profile is written (studying, cloud sync, other tabs)
+  const profile = useStorageValue<IRTProfile>(profileKey, EMPTY_PROFILE);
+
   const chartData = useMemo(() => {
     if (!profile.abilityHistory) return [];
-    
+
     return profile.abilityHistory.map((entry, index) => ({
       step: index + 1,
       ability: Number(entry.ability.toFixed(2)),
@@ -38,6 +42,8 @@ export function Analytics() {
 
         <div className="flex bg-slate-800 rounded-lg p-1">
           <button
+            type="button"
+            aria-pressed={activeDeck === 'trivia'}
             onClick={() => setActiveDeck('trivia')}
             className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
               activeDeck === 'trivia' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-200'
@@ -46,6 +52,8 @@ export function Analytics() {
             Trivia Data
           </button>
           <button
+            type="button"
+            aria-pressed={activeDeck === 'vocabulary'}
             onClick={() => setActiveDeck('vocabulary')}
             className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
               activeDeck === 'vocabulary' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-200'
@@ -58,7 +66,7 @@ export function Analytics() {
         <div className="bg-slate-800 rounded-xl p-6 shadow-xl border border-slate-700">
           <h2 className="text-xl font-semibold mb-4 text-slate-200">θ (Ability) Trajectory</h2>
           <p className="text-sm text-slate-400 mb-6">
-            Tracks the MLE (Maximum Likelihood Estimation) of your latent ability over time.
+            Tracks the estimate of your latent ability over your most recent answers.
           </p>
           
           {chartData.length > 0 ? (

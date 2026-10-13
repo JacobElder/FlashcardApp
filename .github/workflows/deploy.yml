@@ -24,14 +24,30 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test:run
+
       - name: Build
-        run: npm run build
+        env:
+          # Public client values (protected by Row Level Security), set under
+          # Settings → Secrets and variables → Actions
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$VITE_SUPABASE_URL" ] || [ -z "$VITE_SUPABASE_ANON_KEY" ]; then
+            echo "::error::Set the VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY repository secrets; without them the deployed app can't sign in."
+            exit 1
+          fi
+          npm run build
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
