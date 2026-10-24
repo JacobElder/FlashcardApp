@@ -103,3 +103,63 @@ describe('FlashCard Component', () => {
     expect(screen.getByText('Test word')).toBeInTheDocument();
   });
 });
+
+describe('FlashCard interactions', () => {
+  const card: FlashCardType = {
+    id: 'q1', type: 'trivia', front: 'Largest planet?', back: 'Jupiter', category: 'Science',
+    hint: 'Gas giant', options: ['Mars', 'Venus', 'Saturn'],
+  };
+
+  it('moves focus to "Show question" after flipping with "Show answer", so Space does not flip back', () => {
+    const { rerender } = render(<FlashCard card={card} isFlipped={false} onFlip={() => {}} />);
+    screen.getByRole('button', { name: 'Show answer' }).focus();
+    rerender(<FlashCard card={card} isFlipped onFlip={() => {}} />);
+    expect(screen.getByRole('button', { name: 'Show question' })).toHaveFocus();
+
+    rerender(<FlashCard card={card} isFlipped={false} onFlip={() => {}} />);
+    expect(screen.getByRole('button', { name: 'Show answer' })).toHaveFocus();
+  });
+
+  it('does not steal focus when the flip came from elsewhere', () => {
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    outside.focus();
+    const { rerender } = render(<FlashCard card={card} isFlipped={false} onFlip={() => {}} />);
+    rerender(<FlashCard card={card} isFlipped onFlip={() => {}} />);
+    expect(outside).toHaveFocus();
+    outside.remove();
+  });
+
+  it('does not flip when an MC card or one of its options is clicked', () => {
+    const onFlip = vi.fn();
+    render(<FlashCard card={card} isFlipped={false} onFlip={onFlip} format="mc" onMultipleChoiceSelect={() => {}} />);
+    fireEvent.click(screen.getByText('Largest planet?'));
+    fireEvent.click(screen.getByRole('button', { name: 'Mars' }));
+    expect(onFlip).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Show answer' })).not.toBeInTheDocument();
+  });
+
+  it('answers an MC card once, after the feedback delay, even if clicked twice', () => {
+    vi.useFakeTimers();
+    const onSelect = vi.fn();
+    render(<FlashCard card={card} isFlipped={false} onFlip={() => {}} format="mc" onMultipleChoiceSelect={onSelect} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Jupiter' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mars' }));
+    expect(onSelect).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1000);
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledWith(true);
+  });
+
+  it('reveals the hint without flipping, and hides it again for the next card', () => {
+    const onFlip = vi.fn();
+    const { rerender } = render(<FlashCard card={card} isFlipped={false} onFlip={onFlip} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Show Hint' }));
+    expect(screen.getByText(/Gas giant/)).toBeInTheDocument();
+    expect(onFlip).not.toHaveBeenCalled();
+
+    rerender(<FlashCard card={{ ...card, id: 'q2', hint: 'Ringed' }} isFlipped={false} onFlip={onFlip} />);
+    expect(screen.queryByText(/Ringed/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show Hint' })).toBeInTheDocument();
+  });
+});

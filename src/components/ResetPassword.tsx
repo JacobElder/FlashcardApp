@@ -15,10 +15,16 @@ export function ResetPassword({ onDone }: ResetPasswordProps) {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    const { error } = await getSupabase().auth.updateUser({ password });
-    setLoading(false);
-    if (error) setError(error.message);
-    else onDone();
+    try {
+      const { error } = await getSupabase().auth.updateUser({ password });
+      if (error) throw error;
+      onDone();
+    } catch (err: unknown) {
+      const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : '';
+      setError(message || 'Could not save your password. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -52,6 +58,13 @@ export function ResetPassword({ onDone }: ResetPasswordProps) {
           className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors"
         >
           {loading ? 'Saving...' : 'Save Password'}
+        </button>
+        <button
+          type="button"
+          onClick={onDone}
+          className="w-full text-sm text-slate-400 hover:text-slate-200"
+        >
+          Not now
         </button>
       </form>
     </div>

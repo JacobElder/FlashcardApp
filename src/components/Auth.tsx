@@ -13,7 +13,10 @@ const INPUT_CLASS =
   'w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-2.5 text-base text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500';
 
 function errorMessage(err: unknown): string {
-  return err instanceof Error && err.message ? err.message : 'An error occurred during authentication.';
+  if (err && typeof err === 'object' && 'message' in err && typeof err.message === 'string' && err.message) {
+    return err.message;
+  }
+  return 'An error occurred during authentication.';
 }
 
 export function Auth() {
@@ -41,10 +44,13 @@ export function Auth() {
 
     try {
       if (mode === 'signUp') {
-        const { error } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: redirectTo } });
+        const { data, error } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: redirectTo } });
         if (error) throw error;
-        setNotice('Check your email to confirm your account, then sign in.');
-        setMode('signIn');
+        // With email confirmation off, sign-up signs the user straight in and the app takes over
+        if (!data.session) {
+          setNotice('Check your email to confirm your account, then sign in.');
+          setMode('signIn');
+        }
       } else if (mode === 'reset') {
         const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
         if (error) throw error;

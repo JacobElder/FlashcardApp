@@ -5,6 +5,8 @@ import { ProgressBar } from '../components/ProgressBar';
 import { EmptyState } from '../components/EmptyState';
 import { AddWordModal } from '../components/AddWordModal';
 import { MyWordsList } from '../components/MyWordsList';
+import { QuickCapture } from '../components/QuickCapture';
+import { PendingWordsList } from '../components/PendingWordsList';
 import { SessionSummary } from '../components/SessionSummary';
 import { useAdaptiveTesting } from '../hooks/useAdaptiveTesting';
 import { useStorageValue } from '../hooks/useStorageValue';
@@ -15,35 +17,32 @@ import {
   addUserWord,
   deleteUserWord,
   EMPTY_VOCABULARY,
+  generateWordId,
+  queuePendingWords,
+  removePendingWord,
+  resolvePendingWord,
+  toCardFields,
   updateUserWord,
 } from '../lib/storage';
-import type { VocabularyCard, NewWordFormData } from '../types';
+import type { VocabularyCard, NewWordFormData, PendingWord } from '../types';
 
-function generateId(): string {
-  return `user-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-}
-
-function toCardFields(data: NewWordFormData) {
-  return {
-    word: data.word,
-    definition: data.definition,
-    partOfSpeech: data.partOfSpeech,
-    example: data.example,
-    front: data.word,
-    back: data.definition + (data.example ? `\n\nExample: "${data.example}"` : ''),
-  };
-}
+const NO_PENDING: PendingWord[] = [];
 
 interface VocabularyStudyProps {
   /** Whether this tab is visible (keyboard shortcuts only apply then). */
   isActive: boolean;
+  /** Focus the capture box on mount (opened from the "Add word" shortcut). */
+  autoFocusCapture?: boolean;
 }
 
-export function VocabularyStudy({ isActive }: VocabularyStudyProps) {
+export function VocabularyStudy({ isActive, autoFocusCapture }: VocabularyStudyProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingWord, setEditingWord] = useState<VocabularyCard | null>(null);
+  // Captured word the dictionary couldn't define, being defined by hand
+  const [definingWord, setDefiningWord] = useState<PendingWord | null>(null);
   const [showMyWords, setShowMyWords] = useState(false);
   const userVocabulary = useStorageValue(STORAGE_KEYS.USER_VOCABULARY, EMPTY_VOCABULARY);
+  const pending = userVocabulary.pending ?? NO_PENDING;
 
   // Combine bundled and user vocabulary
   const allCards = useMemo(
@@ -51,11 +50,13 @@ export function VocabularyStudy({ isActive }: VocabularyStudyProps) {
     [userVocabulary.words]
   );
 
+  // Words a save would duplicate: every card and captured word except the one being edited or defined
   const existingWords = useMemo(
-    () => allCards
-      .filter(card => card.id !== editingWord?.id)
-      .map(card => card.word.trim().toLowerCase()),
-    [allCards, editingWord]
+    () => [
+      ...allCards.filter(card => card.id !== editingWord?.id).map(card => card.word),
+      ...pending.filter(item => item.id !== definingWord?.id).map(item => item.word),
+    ].map(word => word.trim().toLowerCase()),
+    [allCards, editingWord, pending, definingWord]
   );
 
   const {
@@ -72,6 +73,7 @@ export function VocabularyStudy({ isActive }: VocabularyStudyProps) {
     isCaughtUp,
     studyAhead,
     resetSession,
+    skippedCount,
     userAbility,
   } = useAdaptiveTesting({
     cards: allCards,
@@ -89,14 +91,15 @@ export function VocabularyStudy({ isActive }: VocabularyStudyProps) {
 
   const openAddModal = () => {
     setEditingWord(null);
+    setDefiningWord(null);
     setIsModalOpen(true);
   };
 
   const handleSaveWord = (data: NewWordFormData) => {
     if (editingWord) {
       updateUserWord(editingWord.id, toCardFields(data));
-    } else {
-      addUserWord({ id: generateId(), type: 'vocabulary', isUserAdded: true, ...toCardFields(data) });
+    } else if (!definingWord || !resolvePendingWord(definingWord.id, data)) {
+      addUserWord({ id: generateWordId(), type: 'vocabulary', isUserAdded: true, ...toCardFields(data) });
     }
   };
 
@@ -137,6 +140,20 @@ export function VocabularyStudy({ isActive }: VocabularyStudyProps) {
           />
         </div>
       </header>
+
+      <QuickCapture
+        onCapture={(words) => queuePendingWords(words, allCards.map(card => card.word))}
+        autoFocus={autoFocusCapture}
+      />
+      <PendingWordsList
+        pending={pending}
+        onDefine={(item) => {
+          setEditingWord(null);
+          setDefiningWord(item);
+          setIsModalOpen(true);
+        }}
+        onRemove={(item) => removePendingWord(item.id)}
+      />
 
       {/* Stats */}
       <div className="flex justify-center gap-6 py-4 px-4 border-b border-slate-800 flex-wrap">
@@ -184,6 +201,13 @@ export function VocabularyStudy({ isActive }: VocabularyStudyProps) {
         {!hasMoreCards ? (
           session.cardsReviewed > 0 ? (
             <SessionSummary session={session} onReset={resetSession} />
+          ) : skippedCount > 0 ? (
+            <EmptyState
+              title="Nothing Left This Session"
+              description="You skipped the remaining cards. Start over to see them again."
+              icon="cards"
+              action={{ label: 'Start Over', onClick: resetSession }}
+            />
           ) : isCaughtUp && totalCards > 0 ? (
             <EmptyState
               title="All Caught Up!"
@@ -243,10 +267,12 @@ export function VocabularyStudy({ isActive }: VocabularyStudyProps) {
       <AddWordModal
         isOpen={isModalOpen}
         initialData={editingWord ?? undefined}
+        initialWord={definingWord?.word}
         existingWords={existingWords}
         onClose={() => {
           setIsModalOpen(false);
           setEditingWord(null);
+          setDefiningWord(null);
         }}
         onSave={handleSaveWord}
       />

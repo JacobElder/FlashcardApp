@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { lookupWord } from '../lib/dictionary';
 import type { NewWordFormData, VocabularyCard } from '../types';
 
 interface AddWordModalProps {
@@ -7,18 +8,22 @@ interface AddWordModalProps {
   onSave: (data: NewWordFormData) => void;
   /** Word being edited; omit to add a new word. */
   initialData?: VocabularyCard;
+  /** Prefill the word when adding (e.g. defining a captured word). */
+  initialWord?: string;
   /** Lowercased words already in the deck, for duplicate detection. */
   existingWords: string[];
 }
 
 const EMPTY_FORM: NewWordFormData = { word: '', definition: '', partOfSpeech: '', example: '' };
 
-export function AddWordModal({ isOpen, onClose, onSave, initialData, existingWords }: AddWordModalProps) {
+export function AddWordModal({ isOpen, onClose, onSave, initialData, initialWord, existingWords }: AddWordModalProps) {
   const [formData, setFormData] = useState<NewWordFormData>(EMPTY_FORM);
   const [errors, setErrors] = useState<Partial<NewWordFormData>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [fetchError, setFetchError] = useState('');
   const dialogRef = useRef<HTMLDivElement>(null);
+  // Bumped whenever an in-flight lookup's result would no longer apply (closed, reopened, word changed)
+  const lookupToken = useRef(0);
   const titleId = useId();
   const isEditing = Boolean(initialData);
   // Read through a ref so a new onClose identity doesn't re-run the focus effect (and steal focus)
@@ -29,6 +34,8 @@ export function AddWordModal({ isOpen, onClose, onSave, initialData, existingWor
 
   // Load the form whenever the dialog opens
   useEffect(() => {
+    lookupToken.current += 1;
+    setIsLoading(false);
     if (!isOpen) return;
     setFormData(initialData
       ? {
@@ -37,10 +44,10 @@ export function AddWordModal({ isOpen, onClose, onSave, initialData, existingWor
           partOfSpeech: initialData.partOfSpeech ?? '',
           example: initialData.example ?? '',
         }
-      : EMPTY_FORM);
+      : { ...EMPTY_FORM, word: initialWord ?? '' });
     setErrors({});
     setFetchError('');
-  }, [isOpen, initialData]);
+  }, [isOpen, initialData, initialWord]);
 
   // Focus management: focus the first field, trap Tab, close on Escape, restore focus on close
   useEffect(() => {
@@ -85,7 +92,7 @@ export function AddWordModal({ isOpen, onClose, onSave, initialData, existingWor
     if (!word) {
       newErrors.word = 'Word is required';
     } else if (existingWords.includes(word.toLowerCase())) {
-      newErrors.word = `"${word}" is already in your deck`;
+      newErrors.word = `"${word}" is already in your deck or waiting to be defined`;
     }
     if (!formData.definition.trim()) {
       newErrors.definition = 'Definition is required';
@@ -113,28 +120,24 @@ export function AddWordModal({ isOpen, onClose, onSave, initialData, existingWor
 
     setIsLoading(true);
     setFetchError('');
+    const token = ++lookupToken.current;
 
     try {
-      const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(formData.word.trim())}`);
-      if (!res.ok) {
-        throw new Error('Word not found or API error');
-      }
-      const data = await res.json();
-
-      const firstMeaning = data[0]?.meanings[0];
-      const firstDefinition = firstMeaning?.definitions[0];
+      const entry = await lookupWord(formData.word);
+      if (token !== lookupToken.current) return; // stale: the form has moved on
+      if (!entry) throw new Error('Word not found');
 
       setFormData(prev => ({
         ...prev,
-        definition: firstDefinition?.definition || prev.definition,
-        partOfSpeech: firstMeaning?.partOfSpeech || prev.partOfSpeech,
-        example: firstDefinition?.example || prev.example,
+        definition: entry.definition,
+        partOfSpeech: entry.partOfSpeech || prev.partOfSpeech,
+        example: entry.example || prev.example,
       }));
       setErrors({});
     } catch {
-      setFetchError('Could not find definition for this word.');
+      if (token === lookupToken.current) setFetchError('Could not find definition for this word.');
     } finally {
-      setIsLoading(false);
+      if (token === lookupToken.current) setIsLoading(false);
     }
   };
 
@@ -143,6 +146,12 @@ export function AddWordModal({ isOpen, onClose, onSave, initialData, existingWor
   ) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
+    if (name === 'word') {
+      // A lookup for the old word no longer applies, nor does its error
+      lookupToken.current += 1;
+      setIsLoading(false);
+      setFetchError('');
+    }
     if (errors[name as keyof NewWordFormData]) {
       setErrors((prev) => ({ ...prev, [name]: undefined }));
     }

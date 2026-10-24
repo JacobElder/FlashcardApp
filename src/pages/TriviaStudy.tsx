@@ -40,15 +40,19 @@ export function TriviaStudy({ isActive }: TriviaStudyProps) {
     []
   );
 
-  const filteredCards = useMemo(() => {
-    let cards = selectedCategory === 'All'
-      ? triviaCards
-      : triviaCards.filter(c => c.category === selectedCategory);
-    if (troubleOnly) {
-      cards = cards.filter(c => troubleCardIds.has(c.id));
-    }
-    return cards;
-  }, [selectedCategory, troubleOnly, troubleCardIds]);
+  const categoryCards = useMemo(
+    () => selectedCategory === 'All' ? triviaCards : triviaCards.filter(c => c.category === selectedCategory),
+    [selectedCategory]
+  );
+  // Trouble cards in the selected category, so the button's count matches what a drill offers
+  const troubleCount = useMemo(
+    () => categoryCards.filter(c => troubleCardIds.has(c.id)).length,
+    [categoryCards, troubleCardIds]
+  );
+  const filteredCards = useMemo(
+    () => troubleOnly ? categoryCards.filter(c => troubleCardIds.has(c.id)) : categoryCards,
+    [categoryCards, troubleOnly, troubleCardIds]
+  );
 
   const {
     currentCard,
@@ -67,6 +71,8 @@ export function TriviaStudy({ isActive }: TriviaStudyProps) {
     resetSession,
     recordPrediction,
     hasPrediction,
+    answerSeen,
+    skippedCount,
     userAbility,
   } = useAdaptiveTesting({
     cards: filteredCards,
@@ -78,6 +84,8 @@ export function TriviaStudy({ isActive }: TriviaStudyProps) {
   // Changing the filter starts a new session. Done in the handlers rather than
   // an effect, which would also fire on mount and could undo a first click.
   const changeFilter = (category: string, trouble: boolean) => {
+    // Re-selecting the current filter shouldn't throw away the session
+    if (category === selectedCategory && trouble === troubleOnly) return;
     setSelectedCategory(category);
     setTroubleOnly(trouble);
     resetSession();
@@ -147,12 +155,12 @@ export function TriviaStudy({ isActive }: TriviaStudyProps) {
           className={`text-xs px-3 py-1 rounded-full font-medium self-center transition-colors ${
             troubleOnly
               ? 'bg-red-600 text-white'
-              : troubleCardIds.size > 0
+              : troubleCount > 0
                 ? 'bg-slate-700 text-red-400 border border-red-700'
                 : 'bg-slate-700 text-slate-400'
           }`}
         >
-          ⚠ Trouble{troubleCardIds.size > 0 ? ` (${troubleCardIds.size})` : ''}
+          ⚠ Trouble{troubleCount > 0 ? ` (${troubleCount})` : ''}
         </button>
       </div>
 
@@ -161,7 +169,14 @@ export function TriviaStudy({ isActive }: TriviaStudyProps) {
         {!hasMoreCards ? (
           session.cardsReviewed > 0 ? (
             <SessionSummary session={session} onReset={resetSession} />
-          ) : troubleOnly && troubleCardIds.size === 0 ? (
+          ) : skippedCount > 0 ? (
+            <EmptyState
+              title="Nothing Left This Session"
+              description="You skipped the remaining cards. Start over to see them again."
+              icon="cards"
+              action={{ label: 'Start Over', onClick: resetSession }}
+            />
+          ) : troubleOnly && troubleCount === 0 ? (
             <EmptyState
               title="No Trouble Cards Yet"
               description="Keep studying — cards you miss more than once will appear here."
@@ -192,7 +207,7 @@ export function TriviaStudy({ isActive }: TriviaStudyProps) {
               onMultipleChoiceSelect={handleMultipleChoice}
             />
 
-            {currentFormat !== 'mc' && !isFlipped && !hasPrediction && (
+            {currentFormat !== 'mc' && !answerSeen && !hasPrediction && (
               <ConfidenceButtons onPredict={recordPrediction} />
             )}
 

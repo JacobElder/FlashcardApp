@@ -22,6 +22,18 @@ export function FlashCard({ card, isFlipped, onFlip, format = 'open', onMultiple
   const [hintVisible, setHintVisible] = useState(false);
   const [selectedMcOption, setSelectedMcOption] = useState<string | null>(null);
   const mcTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const showAnswerButton = useRef<HTMLButtonElement>(null);
+  const showQuestionButton = useRef<HTMLButtonElement>(null);
+
+  // Move focus from the flip control on the face being hidden to the one on the
+  // face being shown. Otherwise the next Space/Enter "clicks" the hidden button
+  // and flips the card straight back.
+  useEffect(() => {
+    const [hidden, shown] = isFlipped
+      ? [showAnswerButton.current, showQuestionButton.current]
+      : [showQuestionButton.current, showAnswerButton.current];
+    if (hidden && document.activeElement === hidden) shown?.focus();
+  }, [isFlipped]);
 
   // Reset hint and cancel a pending MC answer when the card changes or unmounts
   useEffect(() => {
@@ -138,6 +150,7 @@ export function FlashCard({ card, isFlipped, onFlip, format = 'open', onMultiple
             )}
             {isOpen && (
               <button
+                ref={showAnswerButton}
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onFlip(); }}
                 className="text-blue-100 text-sm text-center mt-4 self-center underline-offset-4 hover:underline"
@@ -174,6 +187,7 @@ export function FlashCard({ card, isFlipped, onFlip, format = 'open', onMultiple
             </p>
             {isOpen && (
               <button
+                ref={showQuestionButton}
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onFlip(); }}
                 className="text-emerald-100 text-xs text-center mt-2 self-center underline-offset-4 hover:underline"
