@@ -86,10 +86,10 @@ export function updateAbility(
   const info = estimate.info + calculateInformation(estimate.ability, b, a, c);
   const step = Math.max(MIN_ABILITY_STEP, 1 / info);
 
-  return {
-    ability: clamp(estimate.ability + step * score, MIN_ABILITY, MAX_ABILITY),
-    info,
-  };
+  const ability = clamp(estimate.ability + step * score, MIN_ABILITY, MAX_ABILITY);
+  // Degenerate parameters (e.g. guessing = 1) give NaN; never let that reach the saved profile
+  if (!Number.isFinite(ability) || !Number.isFinite(info)) return estimate;
+  return { ability, info };
 }
 
 /**
@@ -105,7 +105,8 @@ export function updateItemDifficulty(
 ): number {
   const p = calculateProbability(ability, item.difficulty, item.discrimination, item.guessing);
   const k = Math.max(0.05, 0.4 / (1 + 0.2 * timesAnswered));
-  return clamp(item.difficulty + k * (p - (isCorrect ? 1 : 0)), MIN_ABILITY, MAX_ABILITY);
+  const difficulty = clamp(item.difficulty + k * (p - (isCorrect ? 1 : 0)), MIN_ABILITY, MAX_ABILITY);
+  return Number.isFinite(difficulty) ? difficulty : item.difficulty;
 }
 
 /** Mean authored difficulty per category, used for cards that have none. */
@@ -135,8 +136,22 @@ export function getItemParams(
   return {
     difficulty: history?.estMcDifficulty ?? card.mcDifficulty ?? openDifficulty - MC_DIFFICULTY_OFFSET,
     discrimination: card.mcDiscrimination ?? openDiscrimination * 0.8,
-    guessing: 1 / ((card.options?.length ?? 0) + 1),
+    // Chance of guessing among the options plus the answer; no options means no guessing
+    guessing: card.options?.length ? 1 / (card.options.length + 1) : 0,
   };
+}
+
+/**
+ * When a card answered at `answeredAt` and placed in a box with this interval
+ * comes due: the start of the local day N days later, so a card is due all
+ * day rather than from the exact minute it was last answered.
+ */
+export function reviewDateFor(answeredAt: Date, intervalDays: number): Date {
+  if (intervalDays <= 0) return new Date(answeredAt);
+  const due = new Date(answeredAt);
+  due.setHours(0, 0, 0, 0);
+  due.setDate(due.getDate() + intervalDays);
+  return due;
 }
 
 /** A card is due when it has never been answered or its review date has passed. */
@@ -194,6 +209,15 @@ export function selectNextCard(
   return best;
 }
 
+/** An MC-only card's review date, pulled in to no later than the MC box cap allows. */
+function cappedReviewDate(mc: IRTCardHistory): string | undefined {
+  if (!mc.nextReviewDate || !mc.lastAnsweredDate || (mc.leitnerBox ?? 0) <= MC_BOX_CAP) {
+    return mc.nextReviewDate;
+  }
+  const cap = reviewDateFor(new Date(mc.lastAnsweredDate), BOX_INTERVAL_DAYS[MC_BOX_CAP]);
+  return new Date(mc.nextReviewDate) > cap ? cap.toISOString() : mc.nextReviewDate;
+}
+
 /**
  * Fold legacy `${id}-mc` history entries (from when MC was scheduled
  * separately) into the card's single entry. Returns null if nothing changed.
@@ -222,7 +246,7 @@ export function migrateProfile(profile: IRTProfile): IRTProfile | null {
           mcTimesCorrect: mc.timesCorrect,
           lastAnsweredDate: mc.lastAnsweredDate,
           leitnerBox: Math.min(mc.leitnerBox ?? 0, MC_BOX_CAP),
-          nextReviewDate: mc.nextReviewDate,
+          nextReviewDate: cappedReviewDate(mc),
         };
   }
   return { ...profile, cardHistory };

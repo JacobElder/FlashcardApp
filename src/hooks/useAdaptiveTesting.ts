@@ -10,6 +10,7 @@ import {
   initialAbilityInfo,
   isDue,
   migrateProfile,
+  reviewDateFor,
   selectNextCard,
   updateAbility,
   updateItemDifficulty,
@@ -53,6 +54,10 @@ interface UseAdaptiveTestingReturn {
   resetSession: () => void;
   recordPrediction: (prediction: ConfidencePrediction) => void;
   hasPrediction: boolean;
+  /** The answer to the current card has been shown, so a prediction no longer counts. */
+  answerSeen: boolean;
+  /** Cards skipped this session. */
+  skippedCount: number;
   userAbility: number;
 }
 
@@ -69,11 +74,15 @@ function newSession(): StudySession {
   };
 }
 
-/** Next Leitner box for a rating. "Hard" is a correct answer that doesn't earn a longer interval. */
-function nextBox(box: number, rating: Rating, format: CardFormat): number {
+/**
+ * Next Leitner box for a rating. "Hard" is a correct answer that doesn't earn
+ * a longer interval, in either format. A correct MC answer can't move a card
+ * past MC_BOX_CAP on its own, but never demotes one already above it.
+ */
+export function nextBox(box: number, rating: Rating, format: CardFormat): number {
   if (rating < RATING_VALUES.hard) return 0;
-  if (format === 'mc') return box >= MC_BOX_CAP ? box : box + 1;
   if (rating === RATING_VALUES.hard) return Math.max(1, box);
+  if (format === 'mc') return box >= MC_BOX_CAP ? box : box + 1;
   if (rating === RATING_VALUES.easy) return Math.min(MAX_BOX, box + 2);
   return Math.min(MAX_BOX, box + 1);
 }
@@ -93,6 +102,8 @@ export function useAdaptiveTesting({
   }, [irtProfile, storageKey]);
 
   const [isFlipped, setIsFlipped] = useState(false);
+  const [answerSeen, setAnswerSeen] = useState(false);
+  const [skippedCount, setSkippedCount] = useState(0);
   const [reviewedInSession, setReviewedInSession] = useState<Set<string>>(() => new Set());
   const [currentPrediction, setCurrentPrediction] = useState<ConfidencePrediction | null>(null);
   const [isStudyingAhead, setIsStudyingAhead] = useState(false);
@@ -118,6 +129,23 @@ export function useAdaptiveTesting({
   const candidates = ignoreSchedule || isStudyingAhead ? unseenCards : dueCards;
   const sessionComplete = session.cardsReviewed >= sessionSize || candidates.length === 0;
 
+  // A tab left open (e.g. overnight) would otherwise keep judging due-ness
+  // against when it was opened. Refresh on return, but not mid-session, so
+  // cards don't appear while the user is working through a deck.
+  const canRefreshNow = sessionComplete || (session.cardsReviewed === 0 && reviewedInSession.size === 0);
+  useEffect(() => {
+    if (!canRefreshNow) return;
+    const refresh = () => {
+      if (document.visibilityState === 'visible') setSessionNow(Date.now());
+    };
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [canRefreshNow]);
+
   // Keep showing the same card until it's answered or skipped, even if the
   // profile changes underneath it (e.g. a cloud sync lands mid-card).
   const selection = useMemo<Selection | null>(() => {
@@ -139,23 +167,30 @@ export function useAdaptiveTesting({
     return Math.max(0, Math.min(100, Math.round(score)));
   }, [irtProfile.ability]);
 
-  const flipCard = useCallback(() => setIsFlipped(prev => !prev), []);
+  const flipCard = useCallback(() => {
+    setIsFlipped(prev => !prev);
+    setAnswerSeen(true);
+  }, []);
 
   const advance = useCallback((cardId: string) => {
     setCurrentPrediction(null);
     setIsFlipped(false);
+    setAnswerSeen(false);
     setReviewedInSession(prev => new Set(prev).add(cardId));
   }, []);
 
   const skipCard = useCallback(() => {
     if (!currentCard) return;
     // Excluded for the rest of this session; ability and schedule are untouched
+    setSkippedCount(n => n + 1);
     advance(currentCard.id);
   }, [currentCard, advance]);
 
   const recordPrediction = useCallback((prediction: ConfidencePrediction) => {
+    // A prediction made after seeing the answer would inflate prediction accuracy
+    if (answerSeen) return;
     setCurrentPrediction(prediction);
-  }, []);
+  }, [answerSeen]);
 
   const rateCard = useCallback((rating: Rating) => {
     if (!currentCard || ratedCardId.current === currentCard.id) return;
@@ -175,8 +210,7 @@ export function useAdaptiveTesting({
 
     const box = nextBox(history.leitnerBox ?? 0, rating, currentFormat);
     const intervalBox = currentFormat === 'mc' ? Math.min(box, MC_BOX_CAP) : box;
-    const nextReview = new Date(now);
-    nextReview.setDate(nextReview.getDate() + BOX_INTERVAL_DAYS[intervalBox]);
+    const nextReview = reviewDateFor(now, BOX_INTERVAL_DAYS[intervalBox]);
 
     const isMc = currentFormat === 'mc';
     const answeredInFormat = isMc ? history.mcTimesAnswered ?? 0 : history.timesAnswered;
@@ -248,6 +282,8 @@ export function useAdaptiveTesting({
     ratedCardId.current = null;
     setReviewedInSession(new Set());
     setIsFlipped(false);
+    setAnswerSeen(false);
+    setSkippedCount(0);
     setCurrentPrediction(null);
     setIsStudyingAhead(false);
     setPinned(null);
@@ -277,6 +313,8 @@ export function useAdaptiveTesting({
     resetSession,
     recordPrediction,
     hasPrediction: currentPrediction !== null,
+    answerSeen,
+    skippedCount,
     userAbility: irtProfile.ability,
   };
 }

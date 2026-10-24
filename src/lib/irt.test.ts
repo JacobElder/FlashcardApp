@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
+  MAX_ABILITY,
+  MIN_ABILITY,
+  initialAbilityInfo,
+  reviewDateFor,
   buildDifficultyPriors,
   calculateInformation,
   calculateProbability,
@@ -143,5 +147,107 @@ describe('migrateProfile', () => {
 
   it('returns null when there is nothing to migrate', () => {
     expect(migrateProfile({ ability: 0, cardHistory: {} })).toBeNull();
+  });
+});
+
+describe('IRT robustness', () => {
+  it('uses no guessing floor for an MC card without options, so ability never becomes NaN', () => {
+    const card = { id: 'x', type: 'trivia' as const, front: 'Q', back: 'A' };
+    expect(getItemParams(card, undefined, 'mc').guessing).toBe(0);
+    const next = updateAbility({ ability: 0, info: 1 }, { difficulty: 0, discrimination: 1, guessing: 1 }, true);
+    expect(next).toEqual({ ability: 0, info: 1 }); // degenerate item: estimate unchanged
+  });
+
+  it('keeps the item difficulty when the update is not finite', () => {
+    expect(updateItemDifficulty(0, { difficulty: 1, discrimination: NaN, guessing: 0 }, true, 0)).toBe(1);
+  });
+
+  it('moves ability in the right direction and stays in range across a grid of items', () => {
+    for (const ability of [-4, -2, 0, 2, 4]) {
+      for (const difficulty of [-4, -1, 0, 1, 4]) {
+        for (const discrimination of [0.3, 1, 2.5]) {
+          for (const guessing of [0, 0.25]) {
+            const item = { difficulty, discrimination, guessing };
+            const p = calculateProbability(ability, difficulty, discrimination, guessing);
+            expect(p).toBeGreaterThanOrEqual(guessing);
+            expect(p).toBeLessThanOrEqual(1);
+            const right = updateAbility({ ability, info: 1 }, item, true);
+            const wrong = updateAbility({ ability, info: 1 }, item, false);
+            expect(right.ability).toBeGreaterThanOrEqual(ability);
+            expect(wrong.ability).toBeLessThanOrEqual(ability);
+            for (const a of [right.ability, wrong.ability]) {
+              expect(a).toBeGreaterThanOrEqual(MIN_ABILITY);
+              expect(a).toBeLessThanOrEqual(MAX_ABILITY);
+            }
+            expect(right.info).toBeGreaterThanOrEqual(1); // an uninformative item adds ~0
+          }
+        }
+      }
+    }
+  });
+
+  it('starts a profile saved before abilityInfo existed from its answer count', () => {
+    expect(initialAbilityInfo({ ability: 0, cardHistory: {} })).toBe(1);
+    expect(initialAbilityInfo({
+      ability: 0,
+      cardHistory: { a: { cardId: 'a', timesAnswered: 3, timesCorrect: 1 }, b: { cardId: 'b', timesAnswered: 2, timesCorrect: 2 } },
+    })).toBeCloseTo(2);
+    expect(initialAbilityInfo({ ability: 0, abilityInfo: 7, cardHistory: {} })).toBe(7);
+  });
+});
+
+describe('scheduling dates', () => {
+  it('puts the review at local midnight N days later, or now for box 0', () => {
+    const answered = new Date('2026-03-10T21:30:00-04:00');
+    expect(reviewDateFor(answered, 0).toISOString()).toBe(answered.toISOString());
+    expect(reviewDateFor(answered, 1).toISOString()).toBe(new Date('2026-03-11T00:00:00-04:00').toISOString());
+    expect(reviewDateFor(answered, 7).toISOString()).toBe(new Date('2026-03-17T00:00:00-04:00').toISOString());
+  });
+
+  it('is due at exactly the review time, not a millisecond before', () => {
+    const history = { cardId: 'a', timesAnswered: 1, timesCorrect: 1, nextReviewDate: '2026-03-10T12:00:00.000Z' };
+    const t = new Date('2026-03-10T12:00:00.000Z').getTime();
+    expect(isDue(history, t)).toBe(true);
+    expect(isDue(history, t - 1)).toBe(false);
+    expect(isDue(undefined, t)).toBe(true);
+  });
+});
+
+describe('format selection', () => {
+  it('prefers MC when open recall is far too hard for the user', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const card = { id: 'a', type: 'trivia' as const, front: 'Q', back: 'A', options: ['x', 'y', 'z'], difficulty: 4, mcDifficulty: -1 };
+    expect(selectNextCard(-1, [card], {})?.format).toBe('mc');
+  });
+
+  it('always uses open recall for a card without options', () => {
+    const card = { id: 'a', type: 'trivia' as const, front: 'Q', back: 'A', difficulty: 4 };
+    expect(selectNextCard(-4, [card], {})?.format).toBe('open');
+  });
+});
+
+describe('migrateProfile review dates', () => {
+  it('pulls a capped MC-only card in to no later than the cap interval', () => {
+    const migrated = migrateProfile({
+      ability: 0,
+      cardHistory: {
+        'a-mc': {
+          cardId: 'a-mc', timesAnswered: 4, timesCorrect: 4, leitnerBox: 4,
+          lastAnsweredDate: '2026-03-01T15:00:00.000Z', nextReviewDate: '2026-03-15T15:00:00.000Z',
+        },
+      },
+    })!;
+    expect(migrated.cardHistory.a.leitnerBox).toBe(2);
+    expect(migrated.cardHistory.a.nextReviewDate).toBe(new Date('2026-03-04T00:00:00-05:00').toISOString());
+  });
+
+  it('leaves an MC review date inside the cap alone', () => {
+    const migrated = migrateProfile({
+      ability: 0,
+      cardHistory: {
+        'a-mc': { cardId: 'a-mc', timesAnswered: 1, timesCorrect: 1, leitnerBox: 1, lastAnsweredDate: '2026-03-01T15:00:00.000Z', nextReviewDate: '2026-03-02T15:00:00.000Z' },
+      },
+    })!;
+    expect(migrated.cardHistory.a.nextReviewDate).toBe('2026-03-02T15:00:00.000Z');
   });
 });
