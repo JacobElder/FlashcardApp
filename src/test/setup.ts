@@ -1,7 +1,8 @@
 import '@testing-library/jest-dom'
-import { afterEach, beforeEach } from 'vitest'
+import { afterEach, beforeEach, vi } from 'vitest'
 import { cleanup } from '@testing-library/react'
 import { resetStorageCache } from '../lib/storage'
+import { resetPendingWordRetries } from '../lib/pendingWords'
 
 // In-memory localStorage (Node's experimental global localStorage can shadow jsdom's)
 const store = new Map<string, string>()
@@ -19,8 +20,11 @@ Object.defineProperty(globalThis, 'localStorage', { value: localStorageMock, con
 beforeEach(() => {
   localStorageMock.clear()
   resetStorageCache()
+  resetPendingWordRetries()
 })
 
 afterEach(() => {
   cleanup()
+  // A test that fails mid-way must not leak fake timers into the next one
+  vi.useRealTimers()
 })

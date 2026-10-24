@@ -17,6 +17,8 @@ import {
   clearAllData,
   localDateString,
   subscribeToStorage,
+  subscribeToStorageErrors,
+  hasStorageWriteFailed,
 } from './storage';
 import type { VocabularyCard } from '../types';
 
@@ -179,5 +181,66 @@ describe('Storage Utilities', () => {
       expect(getUserVocabulary().words).toEqual([]);
       expect(getStudyStats().totalCardsReviewed).toBe(0);
     });
+  });
+});
+
+describe('storage failures and other tabs', () => {
+  it('keeps a value in memory and reports it when localStorage is full', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const onError = vi.fn();
+    const unsubscribe = subscribeToStorageErrors(onError);
+    const onChange = vi.fn();
+    const unsubscribeChange = subscribeToStorage(onChange);
+    vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+      throw new DOMException('full', 'QuotaExceededError');
+    });
+
+    setToStorage(STORAGE_KEYS.INCORRECT_COUNTS, { a: 1 });
+
+    expect(getFromStorage(STORAGE_KEYS.INCORRECT_COUNTS, {})).toEqual({ a: 1 });
+    expect(onChange).toHaveBeenCalledWith(STORAGE_KEYS.INCORRECT_COUNTS, 'local');
+    expect(hasStorageWriteFailed()).toBe(true);
+    expect(onError).toHaveBeenCalledTimes(1);
+
+    setToStorage(STORAGE_KEYS.INCORRECT_COUNTS, { a: 2 });
+    expect(onError).toHaveBeenCalledTimes(1); // reported once, not on every write
+    unsubscribe();
+    unsubscribeChange();
+  });
+
+  it('still forgets a key when localStorage.removeItem throws', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    setToStorage('k', { a: 1 });
+    vi.spyOn(localStorage, 'removeItem').mockImplementation(() => { throw new Error('denied'); });
+    removeFromStorage('k');
+    expect(getFromStorage('k', null)).toBeNull();
+  });
+
+  it('re-reads a key changed by another tab and reports it as external', () => {
+    setToStorage('shared', { v: 1 });
+    localStorage.setItem('shared', JSON.stringify({ v: 2 }));
+    expect(getFromStorage('shared', {})).toEqual({ v: 1 }); // still cached
+
+    const onChange = vi.fn();
+    const unsubscribe = subscribeToStorage(onChange);
+    window.dispatchEvent(new StorageEvent('storage', { key: 'shared' }));
+    expect(getFromStorage('shared', {})).toEqual({ v: 2 });
+    expect(onChange).toHaveBeenCalledWith('shared', 'external');
+
+    // A cleared store (key null) drops every cached value
+    localStorage.setItem('shared', JSON.stringify({ v: 3 }));
+    window.dispatchEvent(new StorageEvent('storage', { key: null }));
+    expect(getFromStorage('shared', {})).toEqual({ v: 3 });
+    expect(onChange).toHaveBeenLastCalledWith('*', 'external');
+    unsubscribe();
+  });
+
+  it('stamps user words with their own edit time', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-01T10:00:00Z'));
+    addUserWord(word);
+    vi.setSystemTime(new Date('2026-03-02T10:00:00Z'));
+    updateUserWord(word.id, { definition: 'changed' });
+    expect(getUserVocabulary().words[0]).toMatchObject({ definition: 'changed', updatedAt: '2026-03-02T10:00:00.000Z' });
   });
 });

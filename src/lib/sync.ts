@@ -29,6 +29,10 @@ interface ProgressRow {
   incorrect_counts: Record<string, number>;
 }
 
+interface RemoteRow extends Partial<ProgressRow> {
+  updated_at?: string;
+}
+
 interface LocalSnapshot {
   trivia: IRTProfile | undefined;
   vocabulary: IRTProfile | undefined;
@@ -41,7 +45,7 @@ let userId: string | null = null;
 let dirty = false;
 let pushTimer: ReturnType<typeof setTimeout> | undefined;
 let lastPullAt = 0;
-// Serializes pulls and pushes so a push never races a pull for the same row
+// Serializes syncs so two never race for the same row
 let queue: Promise<void> = Promise.resolve();
 
 // Replaced (never mutated) on change, so it can back useSyncExternalStore
@@ -101,52 +105,24 @@ function describe(error: unknown): string {
   return String(error);
 }
 
-async function push(): Promise<void> {
-  const uid = userId;
-  if (!uid) return;
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    dirty = true;
-    setStatus('offline');
-    return;
-  }
+const isOffline = () => typeof navigator !== 'undefined' && !navigator.onLine;
 
-  setStatus('syncing');
-  const { error } = await getSupabase()
-    .from('user_progress')
-    .upsert({ user_id: uid, ...toRow(readLocal()), updated_at: new Date().toISOString() });
+/** How many times to re-merge when the cloud row changes between our read and write. */
+const MAX_SYNC_ATTEMPTS = 3;
 
-  if (error) {
-    dirty = true; // retried on the next change, focus, or reconnect
-    console.error('Cloud sync push failed:', error);
-    setStatus('error', describe(error));
-  } else {
-    setStatus('synced');
-  }
-}
+type SyncAttempt = 'done' | 'conflict' | 'stale';
 
-async function pull(): Promise<void> {
-  const uid = userId;
-  if (!uid) return;
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    setStatus('offline');
-    return;
-  }
-
-  setStatus('syncing');
-  lastPullAt = Date.now();
-  const { data, error } = await getSupabase()
-    .from('user_progress')
-    .select('trivia_profile, vocabulary_profile, study_stats, user_vocabulary, incorrect_counts')
+/** Merge the cloud row into local storage, then upload the result if the cloud lacks anything. */
+async function syncOnce(uid: string): Promise<SyncAttempt> {
+  const table = () => getSupabase().from('user_progress');
+  const { data, error } = await table()
+    .select('trivia_profile, vocabulary_profile, study_stats, user_vocabulary, incorrect_counts, updated_at')
     .eq('user_id', uid)
-    .maybeSingle<ProgressRow>();
+    .maybeSingle<RemoteRow>();
+  if (error) throw error;
+  if (uid !== userId) return 'stale'; // signed out while the request was in flight
 
-  if (error) {
-    console.error('Cloud sync pull failed:', error);
-    setStatus('error', describe(error));
-    return;
-  }
-  if (uid !== userId) return; // signed out while the request was in flight
-
+  // Read local data after the download, with no await in between, so no local write is missed
   const local = readLocal();
   const merged: LocalSnapshot = {
     trivia: mergeProfiles(local.trivia, data?.trivia_profile),
@@ -162,17 +138,69 @@ async function pull(): Promise<void> {
   writeIfChanged(STORAGE_KEYS.USER_VOCABULARY, merged.userVocabulary);
   writeIfChanged(STORAGE_KEYS.INCORRECT_COUNTS, merged.incorrectCounts);
 
-  // If this device had anything the cloud lacked, send the merged result back
+  // The merge already contains everything local, so if it equals the cloud there's nothing to send
   const mergedRow = toRow(merged);
-  const cloudIsCurrent = data !== null &&
+  const cloudIsCurrent = data != null &&
     (Object.keys(mergedRow) as (keyof ProgressRow)[]).every(
       column => JSON.stringify(mergedRow[column]) === JSON.stringify(data[column])
     );
-  if (cloudIsCurrent && !dirty) {
-    setStatus('synced');
+  if (cloudIsCurrent) return 'done';
+
+  const updatedAt = new Date().toISOString();
+  if (data?.updated_at) {
+    // Compare-and-swap: only overwrite the row we merged with. If another
+    // device or the CLI wrote in the meantime, nothing matches and we re-merge.
+    const { data: written, error: writeError } = await table()
+      .update({ ...mergedRow, updated_at: updatedAt })
+      .eq('user_id', uid)
+      .eq('updated_at', data.updated_at)
+      .select('user_id');
+    if (writeError) throw writeError;
+    if (!written || written.length === 0) return 'conflict';
+  } else if (data) {
+    const { error: writeError } = await table().upsert({ user_id: uid, ...mergedRow, updated_at: updatedAt });
+    if (writeError) throw writeError;
   } else {
-    dirty = false;
-    await push();
+    const { error: writeError } = await table().insert({ user_id: uid, ...mergedRow, updated_at: updatedAt });
+    // Another device created the row first: merge with it instead
+    if (writeError?.code === '23505') return 'conflict';
+    if (writeError) throw writeError;
+  }
+  return 'done';
+}
+
+/**
+ * Bring this device and the cloud in line. Every upload is preceded by a
+ * download and merge, so a device that failed to download, was offline, or
+ * sat open for hours can never overwrite progress it hasn't seen.
+ */
+async function sync(): Promise<void> {
+  const uid = userId;
+  if (!uid) return;
+  if (isOffline()) {
+    setStatus('offline');
+    return;
+  }
+
+  // Changes made from here on are picked up by the next sync
+  dirty = false;
+  setStatus('syncing');
+  lastPullAt = Date.now();
+  try {
+    for (let attempt = 0; attempt < MAX_SYNC_ATTEMPTS; attempt++) {
+      const result = await syncOnce(uid);
+      if (result === 'stale') return;
+      if (result === 'done') {
+        setStatus('synced');
+        return;
+      }
+    }
+    throw new Error('Cloud data kept changing during sync');
+  } catch (error) {
+    if (uid !== userId) return;
+    dirty = true; // retried on the next change, focus, or reconnect
+    console.error('Cloud sync failed:', error);
+    setStatus('error', describe(error));
   }
 }
 
@@ -185,7 +213,7 @@ export function startSync(uid: string): Promise<void> {
   if (userId === uid) return queue;
   claimLocalData(uid);
   userId = uid;
-  return enqueue(pull);
+  return enqueue(sync);
 }
 
 /**
@@ -198,17 +226,17 @@ export function claimLocalData(uid: string): void {
   if (owner !== uid) setStorageOwner(uid);
 }
 
-/** True if local changes haven't reached the cloud yet. */
+/** True if local changes may not have reached the cloud yet. */
 export function hasUnsyncedChanges(): boolean {
-  return dirty || statusSnapshot.status === 'error' || statusSnapshot.status === 'offline';
+  const { status } = statusSnapshot;
+  return dirty || status === 'error' || status === 'offline' || status === 'syncing';
 }
 
 /** Push any pending changes now (e.g. before signing out or when the page is hidden). */
 export function flushPush(): Promise<void> {
   clearTimeout(pushTimer);
   if (!dirty) return queue;
-  dirty = false;
-  return enqueue(push);
+  return enqueue(sync);
 }
 
 /** Stop syncing and forget the user (call after sign-out). */
@@ -233,11 +261,12 @@ if (typeof window !== 'undefined') {
       void flushPush();
     } else if (Date.now() - lastPullAt > FOCUS_PULL_INTERVAL_MS) {
       // Pick up progress made on another device
-      void enqueue(pull);
+      void enqueue(sync);
     }
   });
   window.addEventListener('pagehide', () => void flushPush());
   window.addEventListener('online', () => {
-    if (userId) void enqueue(dirty ? async () => { dirty = false; await push(); } : pull);
+    // Always download first: a device that studied offline must not overwrite the cloud
+    if (userId) void enqueue(sync);
   });
 }

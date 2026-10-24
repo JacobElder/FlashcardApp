@@ -1,4 +1,4 @@
-import type { UserVocabulary, VocabularyCard } from '../types';
+import type { NewWordFormData, PendingWord, UserVocabulary, VocabularyCard } from '../types';
 
 export const STORAGE_KEYS = {
   TRIVIA_PROGRESS: 'nyc-trivia-progress',
@@ -28,6 +28,8 @@ export type WriteOrigin = 'local' | 'remote' | 'external';
 type Listener = (key: string, origin: WriteOrigin) => void;
 
 const listeners = new Set<Listener>();
+const errorListeners = new Set<() => void>();
+let writeFailed = false;
 const MISSING = Symbol('missing');
 // Parsed values, so repeated reads return the same object (required by useSyncExternalStore)
 const cache = new Map<string, unknown>();
@@ -35,6 +37,23 @@ const cache = new Map<string, unknown>();
 export function subscribeToStorage(listener: Listener): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
+}
+
+/** True once a write to localStorage has failed (usually because it's full). */
+export function hasStorageWriteFailed(): boolean {
+  return writeFailed;
+}
+
+export function subscribeToStorageErrors(listener: () => void): () => void {
+  errorListeners.add(listener);
+  return () => errorListeners.delete(listener);
+}
+
+function reportWriteFailure(key: string, error: unknown) {
+  console.error(`Error writing to localStorage key "${key}":`, error);
+  if (writeFailed) return;
+  writeFailed = true;
+  errorListeners.forEach(listener => listener());
 }
 
 function emit(key: string, origin: WriteOrigin) {
@@ -73,11 +92,13 @@ export function getFromStorage<T>(key: string, defaultValue: T): T {
 export function setToStorage<T>(key: string, value: T, origin: WriteOrigin = 'local'): void {
   try {
     localStorage.setItem(key, JSON.stringify(value));
-    cache.set(key, value);
-    emit(key, origin);
   } catch (error) {
-    console.error(`Error writing to localStorage key "${key}":`, error);
+    // Keep the value for this tab (and the cloud sync, which reads the cache)
+    // rather than silently dropping the user's progress
+    reportWriteFailure(key, error);
   }
+  cache.set(key, value);
+  emit(key, origin);
 }
 
 /**
@@ -86,11 +107,11 @@ export function setToStorage<T>(key: string, value: T, origin: WriteOrigin = 'lo
 export function removeFromStorage(key: string): void {
   try {
     localStorage.removeItem(key);
-    cache.set(key, MISSING);
-    emit(key, 'remote');
   } catch (error) {
     console.error(`Error removing from localStorage key "${key}":`, error);
   }
+  cache.set(key, MISSING);
+  emit(key, 'remote');
 }
 
 /** YYYY-MM-DD in the user's local time zone. */
@@ -120,20 +141,22 @@ export function setUserVocabulary(vocabulary: UserVocabulary): void {
 
 export function addUserWord(word: VocabularyCard): void {
   const current = getUserVocabulary();
+  const now = new Date().toISOString();
   setUserVocabulary({
     ...current,
-    words: [...current.words, word],
-    lastUpdated: new Date().toISOString(),
+    words: [...current.words, { ...word, updatedAt: now }],
+    lastUpdated: now,
   });
 }
 
 export function updateUserWord(wordId: string, updates: Partial<VocabularyCard>): void {
   const current = getUserVocabulary();
   if (!current.words.some(w => w.id === wordId)) return;
+  const now = new Date().toISOString();
   setUserVocabulary({
     ...current,
-    words: current.words.map(w => (w.id === wordId ? { ...w, ...updates } : w)),
-    lastUpdated: new Date().toISOString(),
+    words: current.words.map(w => (w.id === wordId ? { ...w, ...updates, updatedAt: now } : w)),
+    lastUpdated: now,
   });
 }
 
@@ -143,6 +166,79 @@ export function deleteUserWord(wordId: string): void {
     ...current,
     words: current.words.filter(w => w.id !== wordId),
     deletedIds: [...new Set([...(current.deletedIds ?? []), wordId])],
+    lastUpdated: new Date().toISOString(),
+  });
+}
+
+/** Card fields for a user word. */
+export function toCardFields(data: NewWordFormData) {
+  return {
+    word: data.word,
+    definition: data.definition,
+    partOfSpeech: data.partOfSpeech,
+    example: data.example,
+    front: data.word,
+    back: data.definition + (data.example ? `\n\nExample: "${data.example}"` : ''),
+  };
+}
+
+export function generateWordId(): string {
+  return `user-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
+/**
+ * Queue words to be defined later. Blank entries and words already in the
+ * deck or queue (case-insensitive) are skipped. Returns the words queued.
+ */
+export function queuePendingWords(words: string[], deckWords: Iterable<string>): string[] {
+  const current = getUserVocabulary();
+  const pending = current.pending ?? [];
+  const known = new Set([...deckWords, ...pending.map(p => p.word)].map(w => w.trim().toLowerCase()));
+  const added: PendingWord[] = [];
+  for (const raw of words) {
+    const word = raw.trim();
+    if (!word || known.has(word.toLowerCase())) continue;
+    known.add(word.toLowerCase());
+    added.push({ id: generateWordId(), word, addedAt: new Date().toISOString(), status: 'queued' });
+  }
+  if (added.length > 0) {
+    setUserVocabulary({ ...current, pending: [...pending, ...added], lastUpdated: new Date().toISOString() });
+  }
+  return added.map(p => p.word);
+}
+
+/** Turn a pending word into a card (keeping its id). False if it's no longer pending. */
+export function resolvePendingWord(id: string, data: NewWordFormData): boolean {
+  const current = getUserVocabulary();
+  const pending = current.pending ?? [];
+  if (!pending.some(p => p.id === id)) return false;
+  const now = new Date().toISOString();
+  setUserVocabulary({
+    ...current,
+    words: [...current.words, { id, type: 'vocabulary', isUserAdded: true, ...toCardFields(data), updatedAt: now }],
+    pending: pending.filter(p => p.id !== id),
+    lastUpdated: now,
+  });
+  return true;
+}
+
+export function markPendingNotFound(id: string): void {
+  const current = getUserVocabulary();
+  const pending = current.pending ?? [];
+  if (!pending.some(p => p.id === id && p.status !== 'not_found')) return;
+  setUserVocabulary({
+    ...current,
+    pending: pending.map(p => (p.id === id ? { ...p, status: 'not_found' as const } : p)),
+    lastUpdated: new Date().toISOString(),
+  });
+}
+
+export function removePendingWord(id: string): void {
+  const current = getUserVocabulary();
+  setUserVocabulary({
+    ...current,
+    pending: (current.pending ?? []).filter(p => p.id !== id),
+    deletedIds: [...new Set([...(current.deletedIds ?? []), id])],
     lastUpdated: new Date().toISOString(),
   });
 }
@@ -231,4 +327,5 @@ export function clearAllData(): void {
 /** Drop cached values so the next read goes to localStorage (for tests). */
 export function resetStorageCache(): void {
   cache.clear();
+  writeFailed = false;
 }

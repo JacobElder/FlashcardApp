@@ -22,6 +22,8 @@ export interface VocabularyCard extends FlashCard {
   definition: string;
   partOfSpeech?: string;
   example?: string;
+  /** When a user-added word was last created or edited; lets a sync merge each word separately. */
+  updatedAt?: string;
 }
 
 export interface TriviaCard extends FlashCard {
@@ -76,9 +78,23 @@ export interface CategorySessionStats {
   total: number;
 }
 
+/**
+ * A word captured without a definition, waiting to be looked up. Its id is
+ * reused for the card it becomes, so other devices can tell it was resolved.
+ */
+export interface PendingWord {
+  id: string;
+  word: string;
+  addedAt: string;
+  /** 'not_found': the dictionary has no entry, so the user must define it. */
+  status: 'queued' | 'not_found';
+}
+
 // User-added vocabulary (stored separately)
 export interface UserVocabulary {
   words: VocabularyCard[];
+  /** Captured words still waiting for a definition. */
+  pending?: PendingWord[];
   /** Ids of deleted words, kept so a cloud merge doesn't resurrect them. */
   deletedIds?: string[];
   lastUpdated: string;
