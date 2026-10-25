@@ -11,6 +11,8 @@ export function CategoryFilter({ categories, selected, onChange }: CategoryFilte
         {categories.map(cat => (
           <button
             key={cat}
+            type="button"
+            aria-pressed={selected === cat}
             onClick={() => onChange(cat)}
             className={`text-sm px-3 py-1.5 rounded-full font-medium whitespace-nowrap transition-colors ${
               selected === cat

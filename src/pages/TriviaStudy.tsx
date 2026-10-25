@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { FlashCard } from '../components/FlashCard';
 import { RatingButtons } from '../components/RatingButtons';
 import { ProgressBar } from '../components/ProgressBar';
@@ -7,40 +7,59 @@ import { CategoryFilter } from '../components/CategoryFilter';
 import { ConfidenceButtons } from '../components/ConfidenceButtons';
 import { SessionSummary } from '../components/SessionSummary';
 import { useAdaptiveTesting } from '../hooks/useAdaptiveTesting';
-import { getStudyStats, getIncorrectCounts } from '../lib/storage';
+import { useStorageValue } from '../hooks/useStorageValue';
+import { useStudyShortcuts } from '../hooks/useStudyShortcuts';
+import {
+  STORAGE_KEYS,
+  EMPTY_STUDY_STATS,
+  currentStreak,
+  TROUBLE_GRADUATION_STREAK,
+  troubleCardIdsFrom,
+  type StudyStats,
+} from '../lib/storage';
+import type { IRTProfile } from '../types';
 import { triviaCards } from '../data/triviaCards';
-import type { Rating } from '../types';
 
-const STORAGE_KEY = 'nyc-trivia-progress';
+const NO_COUNTS: Record<string, number> = {};
+const EMPTY_PROFILE: IRTProfile = { ability: 0, cardHistory: {} };
 
-export function TriviaStudy() {
+interface TriviaStudyProps {
+  /** Whether this tab is visible (keyboard shortcuts only apply then). */
+  isActive: boolean;
+}
+
+export function TriviaStudy({ isActive }: TriviaStudyProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [troubleOnly, setTroubleOnly] = useState(false);
-  const [streak, setStreak] = useState(() => getStudyStats().streak);
+  const stats = useStorageValue<StudyStats>(STORAGE_KEYS.STUDY_STATS, EMPTY_STUDY_STATS);
+  const streak = currentStreak(stats);
 
-  // Read incorrect counts from storage to determine trouble card IDs
-  // (independent of hook so it can be used to filter cards passed in)
-  const [incorrectCounts, setIncorrectCounts] = useState(() => getIncorrectCounts());
-
+  // Cards missed more than once are "trouble" cards until answered correctly a few times in a row
+  const incorrectCounts = useStorageValue(STORAGE_KEYS.INCORRECT_COUNTS, NO_COUNTS);
+  const { cardHistory } = useStorageValue<IRTProfile>(STORAGE_KEYS.TRIVIA_PROGRESS, EMPTY_PROFILE);
   const troubleCardIds = useMemo(
-    () => new Set(Object.entries(incorrectCounts).filter(([, n]) => n > 1).map(([id]) => id)),
-    [incorrectCounts]
+    () => troubleCardIdsFrom(incorrectCounts, cardHistory),
+    [incorrectCounts, cardHistory]
   );
 
   const categories = useMemo(
-    () => ['All', ...Array.from(new Set(triviaCards.map(c => c.category)))],
+    () => ['All', ...Array.from(new Set(triviaCards.map(c => c.category))).sort()],
     []
   );
 
-  const filteredCards = useMemo(() => {
-    let cards = selectedCategory === 'All'
-      ? triviaCards
-      : triviaCards.filter(c => c.category === selectedCategory);
-    if (troubleOnly) {
-      cards = cards.filter(c => troubleCardIds.has(c.id));
-    }
-    return cards;
-  }, [selectedCategory, troubleOnly, troubleCardIds]);
+  const categoryCards = useMemo(
+    () => selectedCategory === 'All' ? triviaCards : triviaCards.filter(c => c.category === selectedCategory),
+    [selectedCategory]
+  );
+  // Trouble cards in the selected category, so the button's count matches what a drill offers
+  const troubleCount = useMemo(
+    () => categoryCards.filter(c => troubleCardIds.has(c.id)).length,
+    [categoryCards, troubleCardIds]
+  );
+  const filteredCards = useMemo(
+    () => troubleOnly ? categoryCards.filter(c => troubleCardIds.has(c.id)) : categoryCards,
+    [categoryCards, troubleOnly, troubleCardIds]
+  );
 
   const {
     currentCard,
@@ -51,31 +70,47 @@ export function TriviaStudy() {
     skipCard,
     session,
     totalCards,
+    dueCount,
     masteryLevel,
     hasMoreCards,
+    isCaughtUp,
+    studyAhead,
     resetSession,
     recordPrediction,
     hasPrediction,
+    answerSeen,
+    skippedCount,
     userAbility,
   } = useAdaptiveTesting({
     cards: filteredCards,
-    storageKey: STORAGE_KEY,
+    storageKey: STORAGE_KEYS.TRIVIA_PROGRESS,
+    // Trouble drills revisit missed cards regardless of their review date
+    ignoreSchedule: troubleOnly,
   });
 
-  // Reset session when filter changes
-  useEffect(() => {
+  // Changing the filter starts a new session. Done in the handlers rather than
+  // an effect, which would also fire on mount and could undo a first click.
+  const changeFilter = (category: string, trouble: boolean) => {
+    // Re-selecting the current filter shouldn't throw away the session
+    if (category === selectedCategory && trouble === troubleOnly) return;
+    setSelectedCategory(category);
+    setTroubleOnly(trouble);
     resetSession();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCategory, troubleOnly]);
+  };
 
-  const handleRateCard = useCallback((rating: Rating) => {
-    rateCard(rating);
-    // Refresh streak and incorrect counts from storage after each rating
-    setStreak(getStudyStats().streak);
-    setIncorrectCounts(getIncorrectCounts());
-  }, [rateCard]);
+  const handleMultipleChoice = useCallback(
+    (isCorrect: boolean) => rateCard(isCorrect ? 4 : 0),
+    [rateCard]
+  );
 
-
+  useStudyShortcuts({
+    enabled: isActive && hasMoreCards,
+    canFlip: currentFormat !== 'mc',
+    isFlipped,
+    onFlip: flipCard,
+    onRate: rateCard,
+    onSkip: skipCard,
+  });
 
   return (
     <div className="min-h-screen bg-slate-900 pb-20">
@@ -85,8 +120,8 @@ export function TriviaStudy() {
           <h1 className="text-xl font-bold text-white">Trivia Study</h1>
           {streak > 0 && (
             <div className="flex items-center gap-1 text-amber-400 text-sm font-semibold">
-              <span>🔥</span>
-              <span>{streak} day{streak !== 1 ? 's' : ''}</span>
+              <span aria-hidden="true">🔥</span>
+              <span>{streak} day{streak !== 1 ? 's' : ''} streak</span>
             </div>
           )}
         </div>
@@ -98,10 +133,7 @@ export function TriviaStudy() {
         <CategoryFilter
           categories={categories}
           selected={selectedCategory}
-          onChange={(cat) => {
-            setSelectedCategory(cat);
-            setTroubleOnly(false);
-          }}
+          onChange={(cat) => changeFilter(cat, false)}
         />
       </div>
 
@@ -116,20 +148,26 @@ export function TriviaStudy() {
           <p className="text-xs text-slate-400">Total Cards</p>
         </div>
         <div className="text-center">
+          <p className="text-2xl font-bold text-sky-400">{dueCount}</p>
+          <p className="text-xs text-slate-400">Due / New</p>
+        </div>
+        <div className="text-center">
           <p className="text-2xl font-bold text-amber-400">{session.cardsReviewed}</p>
           <p className="text-xs text-slate-400">Reviewed</p>
         </div>
         <button
-          onClick={() => setTroubleOnly(prev => !prev)}
+          type="button"
+          onClick={() => changeFilter(selectedCategory, !troubleOnly)}
+          aria-pressed={troubleOnly}
           className={`text-xs px-3 py-1 rounded-full font-medium self-center transition-colors ${
             troubleOnly
               ? 'bg-red-600 text-white'
-              : troubleCardIds.size > 0
+              : troubleCount > 0
                 ? 'bg-slate-700 text-red-400 border border-red-700'
-                : 'bg-slate-700 text-slate-500'
+                : 'bg-slate-700 text-slate-400'
           }`}
         >
-          ⚠ Trouble{troubleCardIds.size > 0 ? ` (${troubleCardIds.size})` : ''}
+          ⚠ Trouble{troubleCount > 0 ? ` (${troubleCount})` : ''}
         </button>
       </div>
 
@@ -138,19 +176,32 @@ export function TriviaStudy() {
         {!hasMoreCards ? (
           session.cardsReviewed > 0 ? (
             <SessionSummary session={session} onReset={resetSession} />
-          ) : troubleOnly && troubleCardIds.size === 0 ? (
+          ) : skippedCount > 0 ? (
+            <EmptyState
+              title="Nothing Left This Session"
+              description="You skipped the remaining cards. Start over to see them again."
+              icon="cards"
+              action={{ label: 'Start Over', onClick: resetSession }}
+            />
+          ) : troubleOnly && troubleCount === 0 ? (
             <EmptyState
               title="No Trouble Cards Yet"
-              description="Keep studying — cards you miss more than once will appear here."
+              description={`Keep studying — cards you miss more than once appear here until you get them right ${TROUBLE_GRADUATION_STREAK} times in a row.`}
               icon="cards"
-              action={{ label: 'Back to All', onClick: () => setTroubleOnly(false) }}
+              action={{ label: 'Back to All', onClick: () => changeFilter(selectedCategory, false) }}
+            />
+          ) : isCaughtUp && totalCards > 0 ? (
+            <EmptyState
+              title="All Caught Up!"
+              description="Nothing in this deck is due for review. Come back later, or study ahead now."
+              icon="check"
+              action={{ label: 'Study Ahead', onClick: studyAhead }}
             />
           ) : (
             <EmptyState
-              title="All Done!"
-              description="You've reviewed all available cards for today. Come back tomorrow for more!"
-              icon="check"
-              action={{ label: 'Review Again', onClick: resetSession }}
+              title="No Cards Available"
+              description="There are no trivia cards in this selection."
+              icon="cards"
             />
           )
         ) : currentCard ? (
@@ -160,27 +211,27 @@ export function TriviaStudy() {
               isFlipped={isFlipped}
               onFlip={flipCard}
               format={currentFormat}
-              onMultipleChoiceSelect={(isCorrect) => handleRateCard(isCorrect ? 5 : 0)}
+              onMultipleChoiceSelect={handleMultipleChoice}
             />
 
-            {currentFormat !== 'mc' && !isFlipped && !hasPrediction && (
+            {currentFormat !== 'mc' && !answerSeen && !hasPrediction && (
               <ConfidenceButtons onPredict={recordPrediction} />
             )}
 
-            {currentFormat !== 'mc' && (
-              <div className="flex justify-center">
-                <button
-                  onClick={skipCard}
-                  className="text-slate-500 hover:text-slate-300 text-sm transition-colors"
-                >
-                  Skip
-                </button>
-              </div>
-            )}
+            <div className="flex justify-center">
+              <button
+                type="button"
+                onClick={skipCard}
+                className="text-slate-400 hover:text-slate-200 text-sm transition-colors"
+                aria-keyshortcuts="S"
+              >
+                Skip
+              </button>
+            </div>
 
             {currentFormat !== 'mc' && isFlipped && (
               <div className="animate-fade-in">
-                <RatingButtons onRate={handleRateCard} />
+                <RatingButtons onRate={rateCard} />
               </div>
             )}
 
@@ -189,20 +240,14 @@ export function TriviaStudy() {
                 <span className="text-emerald-400">✓ {session.correctCount}</span>
                 <span className="text-red-400">✗ {session.incorrectCount}</span>
                 {session.predictions.total > 0 && (
-                  <span className="text-amber-400">
+                  <span className="text-amber-400" title="Prediction accuracy">
                     🎯 {Math.round((session.predictions.correct / session.predictions.total) * 100)}%
                   </span>
                 )}
               </div>
             )}
           </div>
-        ) : (
-          <EmptyState
-            title="No Cards Available"
-            description="There are no trivia cards to study."
-            icon="cards"
-          />
-        )}
+        ) : null}
       </main>
     </div>
   );

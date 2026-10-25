@@ -3,3 +3,8 @@ dist/
 .DS_Store
 .claude/
 *.local
+__pycache__/
+*.pyc
+coverage/
+playwright-report/
+test-results/

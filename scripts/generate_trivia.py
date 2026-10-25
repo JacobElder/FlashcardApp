@@ -25,6 +25,7 @@ def generate_qna_with_llm(text, api_key):
     prompt = f"""Based on the following text, generate a highly informative trivia question and its correct answer. 
 Also generate 10 plausible but factually incorrect distractors (multiple choice options) for this question.
 Return ONLY a JSON object with keys: 'question', 'answer', 'category', and 'candidate_distractors' (a list of 10 strings).
+'category' must be exactly one of: Geography, History, Science, Pop Culture, Sports, Literature, Arts, Food & Drink, Music, Film/TV.
 
 Text:
 {text[:4000]}"""
@@ -73,9 +74,9 @@ def append_to_trivia_cards(card_data, file_path):
         
     end_pos = match.start()
     
-    # Generate an ID based on count
-    card_count = content.count("id: '")
-    new_id = f"auto-{card_count + 1}"
+    # Use the next unused auto-N id (a count-based id collides once cards are removed)
+    existing = [int(n) for n in re.findall(r"id: 'auto-(\d+)'", content)]
+    new_id = f"auto-{max(existing, default=0) + 1}"
     
     options_str = json.dumps(card_data['options'])
     

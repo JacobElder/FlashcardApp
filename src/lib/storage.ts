@@ -1,40 +1,104 @@
-import type { UserVocabulary, VocabularyCard } from '../types';
-import { syncToCloud } from './sync';
+import type { IRTCardHistory, NewWordFormData, PendingWord, UserVocabulary, VocabularyCard } from '../types';
 
-const STORAGE_KEYS = {
+export const STORAGE_KEYS = {
   TRIVIA_PROGRESS: 'nyc-trivia-progress',
   VOCABULARY_PROGRESS: 'nyc-vocabulary-progress',
   USER_VOCABULARY: 'nyc-user-vocabulary',
   STUDY_STATS: 'nyc-study-stats',
   INCORRECT_COUNTS: 'nyc-incorrect-counts',
+  /** Supabase user id the local data belongs to. */
+  OWNER: 'nyc-owner-user-id',
 } as const;
 
+/** Keys whose contents are mirrored to the cloud. */
+export const SYNCED_KEYS: readonly string[] = [
+  STORAGE_KEYS.TRIVIA_PROGRESS,
+  STORAGE_KEYS.VOCABULARY_PROGRESS,
+  STORAGE_KEYS.USER_VOCABULARY,
+  STORAGE_KEYS.STUDY_STATS,
+  STORAGE_KEYS.INCORRECT_COUNTS,
+];
+
 /**
- * Generic localStorage get with JSON parsing
+ * Where a write came from. Only 'local' writes (the user studying on this
+ * device) are pushed to the cloud; 'remote' writes come from a cloud pull and
+ * 'external' ones from another tab, which pushes for itself.
+ */
+export type WriteOrigin = 'local' | 'remote' | 'external';
+type Listener = (key: string, origin: WriteOrigin) => void;
+
+const listeners = new Set<Listener>();
+const errorListeners = new Set<() => void>();
+let writeFailed = false;
+const MISSING = Symbol('missing');
+// Parsed values, so repeated reads return the same object (required by useSyncExternalStore)
+const cache = new Map<string, unknown>();
+
+export function subscribeToStorage(listener: Listener): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+/** True once a write to localStorage has failed (usually because it's full). */
+export function hasStorageWriteFailed(): boolean {
+  return writeFailed;
+}
+
+export function subscribeToStorageErrors(listener: () => void): () => void {
+  errorListeners.add(listener);
+  return () => errorListeners.delete(listener);
+}
+
+function reportWriteFailure(key: string, error: unknown) {
+  console.error(`Error writing to localStorage key "${key}":`, error);
+  if (writeFailed) return;
+  writeFailed = true;
+  errorListeners.forEach(listener => listener());
+}
+
+function emit(key: string, origin: WriteOrigin) {
+  listeners.forEach(listener => listener(key, origin));
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key === null) cache.clear();
+    else cache.delete(e.key);
+    emit(e.key ?? '*', 'external');
+  });
+}
+
+/**
+ * Generic localStorage get with JSON parsing. The returned value is shared;
+ * treat it as immutable.
  */
 export function getFromStorage<T>(key: string, defaultValue: T): T {
-  try {
-    const item = localStorage.getItem(key);
-    if (item === null) return defaultValue;
-    return JSON.parse(item) as T;
-  } catch (error) {
-    console.error(`Error reading from localStorage key "${key}":`, error);
-    return defaultValue;
+  if (!cache.has(key)) {
+    try {
+      const item = localStorage.getItem(key);
+      cache.set(key, item === null ? MISSING : JSON.parse(item));
+    } catch (error) {
+      console.error(`Error reading from localStorage key "${key}":`, error);
+      return defaultValue;
+    }
   }
+  const value = cache.get(key);
+  return value === MISSING ? defaultValue : (value as T);
 }
 
 /**
  * Generic localStorage set with JSON stringifying
  */
-export function setToStorage<T>(key: string, value: T): void {
+export function setToStorage<T>(key: string, value: T, origin: WriteOrigin = 'local'): void {
   try {
     localStorage.setItem(key, JSON.stringify(value));
-    
-    // Asynchronously push this update to Supabase so it's persisted in the cloud
-    syncToCloud().catch(err => console.error("Cloud sync failed:", err));
   } catch (error) {
-    console.error(`Error writing to localStorage key "${key}":`, error);
+    // Keep the value for this tab (and the cloud sync, which reads the cache)
+    // rather than silently dropping the user's progress
+    reportWriteFailure(key, error);
   }
+  cache.set(key, value);
+  emit(key, origin);
 }
 
 /**
@@ -46,16 +110,29 @@ export function removeFromStorage(key: string): void {
   } catch (error) {
     console.error(`Error removing from localStorage key "${key}":`, error);
   }
+  cache.set(key, MISSING);
+  emit(key, 'remote');
 }
 
-// Removed SM-2 progress functions
+/** YYYY-MM-DD in the user's local time zone. */
+export function localDateString(date: Date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function yesterdayString(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return localDateString(d);
+}
 
 // User-added vocabulary
+export const EMPTY_VOCABULARY: UserVocabulary = { words: [], deletedIds: [], lastUpdated: '' };
+
 export function getUserVocabulary(): UserVocabulary {
-  return getFromStorage<UserVocabulary>(STORAGE_KEYS.USER_VOCABULARY, {
-    words: [],
-    lastUpdated: new Date().toISOString(),
-  });
+  return getFromStorage<UserVocabulary>(STORAGE_KEYS.USER_VOCABULARY, EMPTY_VOCABULARY);
 }
 
 export function setUserVocabulary(vocabulary: UserVocabulary): void {
@@ -64,28 +141,106 @@ export function setUserVocabulary(vocabulary: UserVocabulary): void {
 
 export function addUserWord(word: VocabularyCard): void {
   const current = getUserVocabulary();
-  current.words.push(word);
-  current.lastUpdated = new Date().toISOString();
-  setUserVocabulary(current);
+  const now = new Date().toISOString();
+  setUserVocabulary({
+    ...current,
+    words: [...current.words, { ...word, updatedAt: now }],
+    lastUpdated: now,
+  });
 }
 
 export function updateUserWord(wordId: string, updates: Partial<VocabularyCard>): void {
   const current = getUserVocabulary();
-  const index = current.words.findIndex(w => w.id === wordId);
-  if (index !== -1) {
-    current.words[index] = { ...current.words[index], ...updates };
-    current.lastUpdated = new Date().toISOString();
-    setUserVocabulary(current);
-  }
+  if (!current.words.some(w => w.id === wordId)) return;
+  const now = new Date().toISOString();
+  setUserVocabulary({
+    ...current,
+    words: current.words.map(w => (w.id === wordId ? { ...w, ...updates, updatedAt: now } : w)),
+    lastUpdated: now,
+  });
 }
 
 export function deleteUserWord(wordId: string): void {
   const current = getUserVocabulary();
-  current.words = current.words.filter(w => w.id !== wordId);
-  current.lastUpdated = new Date().toISOString();
-  setUserVocabulary(current);
+  setUserVocabulary({
+    ...current,
+    words: current.words.filter(w => w.id !== wordId),
+    deletedIds: [...new Set([...(current.deletedIds ?? []), wordId])],
+    lastUpdated: new Date().toISOString(),
+  });
+}
 
-  // Progress is now tracked via IRT profiles per deck
+/** Card fields for a user word. */
+export function toCardFields(data: NewWordFormData) {
+  return {
+    word: data.word,
+    definition: data.definition,
+    partOfSpeech: data.partOfSpeech,
+    example: data.example,
+    front: data.word,
+    back: data.definition + (data.example ? `\n\nExample: "${data.example}"` : ''),
+  };
+}
+
+export function generateWordId(): string {
+  return `user-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
+/**
+ * Queue words to be defined later. Blank entries and words already in the
+ * deck or queue (case-insensitive) are skipped. Returns the words queued.
+ */
+export function queuePendingWords(words: string[], deckWords: Iterable<string>): string[] {
+  const current = getUserVocabulary();
+  const pending = current.pending ?? [];
+  const known = new Set([...deckWords, ...pending.map(p => p.word)].map(w => w.trim().toLowerCase()));
+  const added: PendingWord[] = [];
+  for (const raw of words) {
+    const word = raw.trim();
+    if (!word || known.has(word.toLowerCase())) continue;
+    known.add(word.toLowerCase());
+    added.push({ id: generateWordId(), word, addedAt: new Date().toISOString(), status: 'queued' });
+  }
+  if (added.length > 0) {
+    setUserVocabulary({ ...current, pending: [...pending, ...added], lastUpdated: new Date().toISOString() });
+  }
+  return added.map(p => p.word);
+}
+
+/** Turn a pending word into a card (keeping its id). False if it's no longer pending. */
+export function resolvePendingWord(id: string, data: NewWordFormData): boolean {
+  const current = getUserVocabulary();
+  const pending = current.pending ?? [];
+  if (!pending.some(p => p.id === id)) return false;
+  const now = new Date().toISOString();
+  setUserVocabulary({
+    ...current,
+    words: [...current.words, { id, type: 'vocabulary', isUserAdded: true, ...toCardFields(data), updatedAt: now }],
+    pending: pending.filter(p => p.id !== id),
+    lastUpdated: now,
+  });
+  return true;
+}
+
+export function markPendingNotFound(id: string): void {
+  const current = getUserVocabulary();
+  const pending = current.pending ?? [];
+  if (!pending.some(p => p.id === id && p.status !== 'not_found')) return;
+  setUserVocabulary({
+    ...current,
+    pending: pending.map(p => (p.id === id ? { ...p, status: 'not_found' as const } : p)),
+    lastUpdated: new Date().toISOString(),
+  });
+}
+
+export function removePendingWord(id: string): void {
+  const current = getUserVocabulary();
+  setUserVocabulary({
+    ...current,
+    pending: (current.pending ?? []).filter(p => p.id !== id),
+    deletedIds: [...new Set([...(current.deletedIds ?? []), id])],
+    lastUpdated: new Date().toISOString(),
+  });
 }
 
 // Study statistics
@@ -97,45 +252,84 @@ export interface StudyStats {
   streak: number;
 }
 
+export const EMPTY_STUDY_STATS: StudyStats = {
+  totalCardsReviewed: 0,
+  totalCorrect: 0,
+  totalIncorrect: 0,
+  lastStudyDate: '',
+  streak: 0,
+};
+
 export function getStudyStats(): StudyStats {
-  return getFromStorage<StudyStats>(STORAGE_KEYS.STUDY_STATS, {
-    totalCardsReviewed: 0,
-    totalCorrect: 0,
-    totalIncorrect: 0,
-    lastStudyDate: '',
-    streak: 0,
-  });
+  return getFromStorage<StudyStats>(STORAGE_KEYS.STUDY_STATS, EMPTY_STUDY_STATS);
+}
+
+/** The streak as of today: a streak whose last day was before yesterday has lapsed. */
+export function currentStreak(stats: StudyStats): number {
+  return stats.lastStudyDate === localDateString() || stats.lastStudyDate === yesterdayString()
+    ? stats.streak
+    : 0;
 }
 
 export function updateStudyStats(correct: number, incorrect: number): void {
   const stats = getStudyStats();
-  const today = new Date().toISOString().split('T')[0];
-  const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+  const today = localDateString();
 
-  stats.totalCardsReviewed += correct + incorrect;
-  stats.totalCorrect += correct;
-  stats.totalIncorrect += incorrect;
-
-  // Update streak
-  if (stats.lastStudyDate === yesterday) {
-    stats.streak += 1;
+  let streak = stats.streak;
+  if (stats.lastStudyDate === yesterdayString()) {
+    streak += 1;
   } else if (stats.lastStudyDate !== today) {
-    stats.streak = 1;
+    streak = 1;
   }
 
-  stats.lastStudyDate = today;
-  setToStorage(STORAGE_KEYS.STUDY_STATS, stats);
+  setToStorage(STORAGE_KEYS.STUDY_STATS, {
+    totalCardsReviewed: stats.totalCardsReviewed + correct + incorrect,
+    totalCorrect: stats.totalCorrect + correct,
+    totalIncorrect: stats.totalIncorrect + incorrect,
+    lastStudyDate: today,
+    streak,
+  });
 }
 
 // Incorrect counts — tracks how many times each card has been rated "again" (0)
+const EMPTY_COUNTS: Record<string, number> = {};
+
 export function getIncorrectCounts(): Record<string, number> {
-  return getFromStorage<Record<string, number>>(STORAGE_KEYS.INCORRECT_COUNTS, {});
+  return getFromStorage<Record<string, number>>(STORAGE_KEYS.INCORRECT_COUNTS, EMPTY_COUNTS);
 }
 
 export function incrementIncorrectCount(cardId: string): void {
   const counts = getIncorrectCounts();
-  counts[cardId] = (counts[cardId] ?? 0) + 1;
-  setToStorage(STORAGE_KEYS.INCORRECT_COUNTS, counts);
+  setToStorage(STORAGE_KEYS.INCORRECT_COUNTS, { ...counts, [cardId]: (counts[cardId] ?? 0) + 1 });
+}
+
+/** Correct answers in a row that take a card off the trouble list. */
+export const TROUBLE_GRADUATION_STREAK = 3;
+
+/**
+ * Cards missed more than once that haven't since been answered correctly
+ * TROUBLE_GRADUATION_STREAK times in a row. The streak lives in the card's
+ * history rather than lowering the miss count, because sync keeps the larger
+ * miss count from either device and would undo a decrease.
+ */
+export function troubleCardIdsFrom(
+  counts: Record<string, number>,
+  cardHistory: Record<string, IRTCardHistory> = {}
+): Set<string> {
+  return new Set(
+    Object.entries(counts)
+      .filter(([id, n]) => n > 1 && (cardHistory[id]?.correctStreak ?? 0) < TROUBLE_GRADUATION_STREAK)
+      .map(([id]) => id)
+  );
+}
+
+// Ownership: which signed-in user the local data belongs to
+export function getStorageOwner(): string | null {
+  return getFromStorage<string | null>(STORAGE_KEYS.OWNER, null);
+}
+
+export function setStorageOwner(userId: string): void {
+  setToStorage(STORAGE_KEYS.OWNER, userId, 'remote');
 }
 
 // Clear all data
@@ -143,4 +337,10 @@ export function clearAllData(): void {
   Object.values(STORAGE_KEYS).forEach(key => {
     removeFromStorage(key);
   });
+}
+
+/** Drop cached values so the next read goes to localStorage (for tests). */
+export function resetStorageCache(): void {
+  cache.clear();
+  writeFailed = false;
 }

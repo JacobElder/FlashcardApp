@@ -56,8 +56,8 @@ export function SessionSummary({ session, onReset }: SessionSummaryProps) {
         </div>
       )}
 
-      {/* Category breakdown */}
-      {categoryEntries.length > 0 && (
+      {/* Category breakdown (pointless for a single-category deck) */}
+      {categoryEntries.length > 1 && (
         <div className="bg-slate-800 rounded-2xl p-4 space-y-3">
           <h3 className="text-slate-300 font-medium">By Category</h3>
           {categoryEntries.map(([cat, stats]) => {
@@ -80,6 +80,7 @@ export function SessionSummary({ session, onReset }: SessionSummaryProps) {
       )}
 
       <button
+        type="button"
         onClick={onReset}
         className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition-colors"
       >

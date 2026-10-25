@@ -52,15 +52,18 @@ export function RatingButtons({ onRate, disabled = false }: RatingButtonsProps) 
         How well did you know this?
       </p>
       <div className="grid grid-cols-4 gap-2">
-        {ratingOptions.map((option) => (
+        {ratingOptions.map((option, index) => (
           <button
             key={option.name}
+            type="button"
             onClick={() => onRate(RATING_VALUES[option.name])}
             disabled={disabled}
             className={`${option.color} ${option.hoverColor} text-white py-3 px-2 rounded-xl font-semibold text-sm transition-all duration-200 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex flex-col items-center gap-1`}
             aria-label={`${option.label}: ${option.description}`}
+            aria-keyshortcuts={String(index + 1)}
           >
             <span>{option.label}</span>
+            <kbd className="hidden sm:inline text-[10px] font-normal opacity-70" aria-hidden="true">{index + 1}</kbd>
           </button>
         ))}
       </div>

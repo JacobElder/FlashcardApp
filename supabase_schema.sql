@@ -1,31 +1,48 @@
--- Run this in your Supabase SQL Editor!
+-- Run this in your Supabase SQL Editor. It is idempotent: safe to run on a
+-- fresh project or on top of the original schema.
 
--- 1. Create a table to store user's IRT Profiles and Study Progress
+-- 1. One row per user holding their synced study data
 CREATE TABLE IF NOT EXISTS user_progress (
-  user_id UUID REFERENCES auth.users(id) PRIMARY KEY,
-  trivia_profile JSONB DEFAULT '{}'::jsonb,
-  vocabulary_profile JSONB DEFAULT '{}'::jsonb,
-  study_stats JSONB DEFAULT '{}'::jsonb,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+  user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  trivia_profile JSONB NOT NULL DEFAULT '{}'::jsonb,
+  vocabulary_profile JSONB NOT NULL DEFAULT '{}'::jsonb,
+  study_stats JSONB NOT NULL DEFAULT '{}'::jsonb,
+  user_vocabulary JSONB NOT NULL DEFAULT '{}'::jsonb,
+  incorrect_counts JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
--- 2. Create a table to store User's custom vocabulary
-CREATE TABLE IF NOT EXISTS user_vocabulary (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  user_id UUID REFERENCES auth.users(id),
-  word TEXT NOT NULL,
-  definition TEXT NOT NULL,
-  part_of_speech TEXT,
-  example TEXT,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
-);
+-- Upgrade an existing table created by the original schema
+ALTER TABLE user_progress ADD COLUMN IF NOT EXISTS user_vocabulary JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE user_progress ADD COLUMN IF NOT EXISTS incorrect_counts JSONB NOT NULL DEFAULT '{}'::jsonb;
 
--- 3. Set up Row Level Security (RLS) so users can only access their own data
+-- Deleting a user account should delete their progress instead of being blocked by it
+ALTER TABLE user_progress DROP CONSTRAINT IF EXISTS user_progress_user_id_fkey;
+ALTER TABLE user_progress
+  ADD CONSTRAINT user_progress_user_id_fkey
+  FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+
+-- 2. Custom vocabulary now lives in user_progress.user_vocabulary (merged
+--    per word with delete tombstones). The old user_vocabulary table was never
+--    written by the app; drop it if it exists and is empty.
+DO $$
+BEGIN
+  -- Nested so the SELECT is only planned when the table exists
+  IF to_regclass('public.user_vocabulary') IS NOT NULL THEN
+    IF NOT EXISTS (SELECT 1 FROM public.user_vocabulary) THEN
+      DROP TABLE public.user_vocabulary;
+    END IF;
+  END IF;
+END $$;
+
+-- 3. Row Level Security: users can only read and write their own row
 ALTER TABLE user_progress ENABLE ROW LEVEL SECURITY;
-ALTER TABLE user_vocabulary ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Users can view own progress" ON user_progress FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "Users can update own progress" ON user_progress FOR ALL USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can view own progress" ON user_progress;
+DROP POLICY IF EXISTS "Users can update own progress" ON user_progress;
+DROP POLICY IF EXISTS "Users can manage own progress" ON user_progress;
 
-CREATE POLICY "Users can view own vocabulary" ON user_vocabulary FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "Users can manage own vocabulary" ON user_vocabulary FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "Users can manage own progress" ON user_progress
+  FOR ALL
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);

@@ -1,30 +1,98 @@
-import { useState } from 'react';
-import type { NewWordFormData } from '../types';
+import { useEffect, useId, useRef, useState } from 'react';
+import { lookupWord } from '../lib/dictionary';
+import type { NewWordFormData, VocabularyCard } from '../types';
 
 interface AddWordModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAdd: (data: NewWordFormData) => void;
+  onSave: (data: NewWordFormData) => void;
+  /** Word being edited; omit to add a new word. */
+  initialData?: VocabularyCard;
+  /** Prefill the word when adding (e.g. defining a captured word). */
+  initialWord?: string;
+  /** Lowercased words already in the deck, for duplicate detection. */
+  existingWords: string[];
 }
 
-export function AddWordModal({ isOpen, onClose, onAdd }: AddWordModalProps) {
-  const [formData, setFormData] = useState<NewWordFormData>({
-    word: '',
-    definition: '',
-    partOfSpeech: '',
-    example: '',
-  });
+const EMPTY_FORM: NewWordFormData = { word: '', definition: '', partOfSpeech: '', example: '' };
+
+export function AddWordModal({ isOpen, onClose, onSave, initialData, initialWord, existingWords }: AddWordModalProps) {
+  const [formData, setFormData] = useState<NewWordFormData>(EMPTY_FORM);
   const [errors, setErrors] = useState<Partial<NewWordFormData>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [fetchError, setFetchError] = useState('');
+  const dialogRef = useRef<HTMLDivElement>(null);
+  // Bumped whenever an in-flight lookup's result would no longer apply (closed, reopened, word changed)
+  const lookupToken = useRef(0);
+  const titleId = useId();
+  const isEditing = Boolean(initialData);
+  // Read through a ref so a new onClose identity doesn't re-run the focus effect (and steal focus)
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
+
+  // Load the form whenever the dialog opens
+  useEffect(() => {
+    lookupToken.current += 1;
+    setIsLoading(false);
+    if (!isOpen) return;
+    setFormData(initialData
+      ? {
+          word: initialData.word,
+          definition: initialData.definition,
+          partOfSpeech: initialData.partOfSpeech ?? '',
+          example: initialData.example ?? '',
+        }
+      : { ...EMPTY_FORM, word: initialWord ?? '' });
+    setErrors({});
+    setFetchError('');
+  }, [isOpen, initialData, initialWord]);
+
+  // Focus management: focus the first field, trap Tab, close on Escape, restore focus on close
+  useEffect(() => {
+    if (!isOpen) return;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    dialogRef.current?.querySelector<HTMLElement>('input, textarea, select')?.focus();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (e.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input, textarea, select, [tabindex]:not([tabindex="-1"])'
+      );
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      previouslyFocused?.focus();
+    };
+  }, [isOpen]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
     // Validate
     const newErrors: Partial<NewWordFormData> = {};
-    if (!formData.word.trim()) {
+    const word = formData.word.trim();
+    if (!word) {
       newErrors.word = 'Word is required';
+    } else if (existingWords.includes(word.toLowerCase())) {
+      newErrors.word = `"${word}" is already in your deck or waiting to be defined`;
     }
     if (!formData.definition.trim()) {
       newErrors.definition = 'Definition is required';
@@ -35,17 +103,12 @@ export function AddWordModal({ isOpen, onClose, onAdd }: AddWordModalProps) {
       return;
     }
 
-    onAdd({
-      word: formData.word.trim(),
+    onSave({
+      word,
       definition: formData.definition.trim(),
       partOfSpeech: formData.partOfSpeech?.trim() || undefined,
       example: formData.example?.trim() || undefined,
     });
-
-    // Reset form
-    setFormData({ word: '', definition: '', partOfSpeech: '', example: '' });
-    setErrors({});
-    setFetchError('');
     onClose();
   };
 
@@ -54,31 +117,27 @@ export function AddWordModal({ isOpen, onClose, onAdd }: AddWordModalProps) {
       setErrors({ word: 'Please enter a word to auto-fill' });
       return;
     }
-    
+
     setIsLoading(true);
     setFetchError('');
-    
+    const token = ++lookupToken.current;
+
     try {
-      const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(formData.word.trim())}`);
-      if (!res.ok) {
-        throw new Error('Word not found or API error');
-      }
-      const data = await res.json();
-      
-      const firstMeaning = data[0]?.meanings[0];
-      const firstDefinition = firstMeaning?.definitions[0];
-      
+      const entry = await lookupWord(formData.word);
+      if (token !== lookupToken.current) return; // stale: the form has moved on
+      if (!entry) throw new Error('Word not found');
+
       setFormData(prev => ({
         ...prev,
-        definition: firstDefinition?.definition || prev.definition,
-        partOfSpeech: firstMeaning?.partOfSpeech || prev.partOfSpeech,
-        example: firstDefinition?.example || prev.example,
+        definition: entry.definition,
+        partOfSpeech: entry.partOfSpeech || prev.partOfSpeech,
+        example: entry.example || prev.example,
       }));
       setErrors({});
-    } catch (err) {
-      setFetchError('Could not find definition for this word.');
+    } catch {
+      if (token === lookupToken.current) setFetchError('Could not find definition for this word.');
     } finally {
-      setIsLoading(false);
+      if (token === lookupToken.current) setIsLoading(false);
     }
   };
 
@@ -87,6 +146,12 @@ export function AddWordModal({ isOpen, onClose, onAdd }: AddWordModalProps) {
   ) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
+    if (name === 'word') {
+      // A lookup for the old word no longer applies, nor does its error
+      lookupToken.current += 1;
+      setIsLoading(false);
+      setFetchError('');
+    }
     if (errors[name as keyof NewWordFormData]) {
       setErrors((prev) => ({ ...prev, [name]: undefined }));
     }
@@ -104,21 +169,31 @@ export function AddWordModal({ isOpen, onClose, onAdd }: AddWordModalProps) {
       />
 
       {/* Modal */}
-      <div className="relative bg-slate-800 rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="relative bg-slate-800 rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl"
+      >
         <div className="p-6">
           {/* Header */}
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xl font-semibold text-white">Add New Word</h2>
+            <h2 id={titleId} className="text-xl font-semibold text-white">
+              {isEditing ? 'Edit Word' : 'Add New Word'}
+            </h2>
             <button
+              type="button"
               onClick={onClose}
               className="text-slate-400 hover:text-white transition-colors p-1"
-              aria-label="Close modal"
+              aria-label="Close dialog"
             >
               <svg
                 className="w-6 h-6"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
+                aria-hidden="true"
               >
                 <path
                   strokeLinecap="round"
@@ -151,6 +226,8 @@ export function AddWordModal({ isOpen, onClose, onAdd }: AddWordModalProps) {
                   } rounded-lg px-4 py-2.5 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
                   placeholder="Enter word"
                   autoComplete="off"
+                  aria-invalid={Boolean(errors.word)}
+                  aria-describedby={errors.word ? 'word-error' : undefined}
                 />
                 <button
                   type="button"
@@ -162,10 +239,10 @@ export function AddWordModal({ isOpen, onClose, onAdd }: AddWordModalProps) {
                 </button>
               </div>
               {errors.word && (
-                <p className="text-red-400 text-sm mt-1">{errors.word}</p>
+                <p id="word-error" className="text-red-400 text-sm mt-1">{errors.word}</p>
               )}
               {fetchError && (
-                <p className="text-yellow-400 text-sm mt-1">{fetchError}</p>
+                <p className="text-yellow-400 text-sm mt-1" role="status">{fetchError}</p>
               )}
             </div>
 
@@ -186,9 +263,11 @@ export function AddWordModal({ isOpen, onClose, onAdd }: AddWordModalProps) {
                   errors.definition ? 'border-red-500' : 'border-slate-600'
                 } rounded-lg px-4 py-2.5 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none`}
                 placeholder="Enter definition"
+                aria-invalid={Boolean(errors.definition)}
+                aria-describedby={errors.definition ? 'definition-error' : undefined}
               />
               {errors.definition && (
-                <p className="text-red-400 text-sm mt-1">{errors.definition}</p>
+                <p id="definition-error" className="text-red-400 text-sm mt-1">{errors.definition}</p>
               )}
             </div>
 
@@ -249,7 +328,7 @@ export function AddWordModal({ isOpen, onClose, onAdd }: AddWordModalProps) {
                 type="submit"
                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-medium transition-colors"
               >
-                Add Word
+                {isEditing ? 'Save Changes' : 'Add Word'}
               </button>
             </div>
           </form>
