@@ -24,6 +24,8 @@ export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error' | 'offline';
 interface ProgressRow {
   trivia_profile: IRTProfile;
   vocabulary_profile: IRTProfile;
+  /** Absent when the database predates the Data Science deck (see hasDataScienceColumn). */
+  data_science_profile?: IRTProfile;
   study_stats: StudyStats;
   user_vocabulary: UserVocabulary;
   incorrect_counts: Record<string, number>;
@@ -36,6 +38,7 @@ interface RemoteRow extends Partial<ProgressRow> {
 interface LocalSnapshot {
   trivia: IRTProfile | undefined;
   vocabulary: IRTProfile | undefined;
+  dataScience: IRTProfile | undefined;
   stats: StudyStats | undefined;
   userVocabulary: UserVocabulary | undefined;
   incorrectCounts: Record<string, number> | undefined;
@@ -45,6 +48,11 @@ let userId: string | null = null;
 let dirty = false;
 let pushTimer: ReturnType<typeof setTimeout> | undefined;
 let lastPullAt = 0;
+// False once the cloud table turns out to lack data_science_profile (schema not
+// yet updated). Everything else keeps syncing; that deck stays on this device.
+let hasDataScienceColumn = true;
+const DATA_SCIENCE_COLUMN = 'data_science_profile';
+const BASE_COLUMNS = 'trivia_profile, vocabulary_profile, study_stats, user_vocabulary, incorrect_counts, updated_at';
 // Serializes syncs so two never race for the same row
 let queue: Promise<void> = Promise.resolve();
 
@@ -76,6 +84,7 @@ function readLocal(): LocalSnapshot {
   return {
     trivia: getFromStorage<IRTProfile | undefined>(STORAGE_KEYS.TRIVIA_PROGRESS, undefined),
     vocabulary: getFromStorage<IRTProfile | undefined>(STORAGE_KEYS.VOCABULARY_PROGRESS, undefined),
+    dataScience: getFromStorage<IRTProfile | undefined>(STORAGE_KEYS.DATA_SCIENCE_PROGRESS, undefined),
     stats: getFromStorage<StudyStats | undefined>(STORAGE_KEYS.STUDY_STATS, undefined),
     userVocabulary: getFromStorage<UserVocabulary | undefined>(STORAGE_KEYS.USER_VOCABULARY, undefined),
     incorrectCounts: getFromStorage<Record<string, number> | undefined>(STORAGE_KEYS.INCORRECT_COUNTS, undefined),
@@ -91,13 +100,22 @@ function writeIfChanged<T>(key: string, value: T) {
 }
 
 function toRow(local: LocalSnapshot): ProgressRow {
-  return {
+  const row: ProgressRow = {
     trivia_profile: local.trivia ?? { ability: 0, cardHistory: {} },
     vocabulary_profile: local.vocabulary ?? { ability: 0, cardHistory: {} },
     study_stats: local.stats ?? EMPTY_STUDY_STATS,
     user_vocabulary: local.userVocabulary ?? { words: [], deletedIds: [], lastUpdated: '' },
     incorrect_counts: local.incorrectCounts ?? {},
   };
+  if (hasDataScienceColumn) row.data_science_profile = local.dataScience ?? { ability: 0, cardHistory: {} };
+  return row;
+}
+
+/** True if the error says the table has no data_science_profile column. */
+function isMissingDataScienceColumn(error: { code?: string; message?: string } | null): boolean {
+  if (!error || !hasDataScienceColumn) return false;
+  // 42703: Postgres undefined column (select); PGRST204: PostgREST unknown column (write)
+  return (error.code === '42703' || error.code === 'PGRST204') && String(error.message ?? '').includes(DATA_SCIENCE_COLUMN);
 }
 
 function describe(error: unknown): string {
@@ -110,15 +128,16 @@ const isOffline = () => typeof navigator !== 'undefined' && !navigator.onLine;
 /** How many times to re-merge when the cloud row changes between our read and write. */
 const MAX_SYNC_ATTEMPTS = 3;
 
-type SyncAttempt = 'done' | 'conflict' | 'stale';
+type SyncAttempt = 'done' | 'conflict' | 'stale' | 'retry';
 
 /** Merge the cloud row into local storage, then upload the result if the cloud lacks anything. */
 async function syncOnce(uid: string): Promise<SyncAttempt> {
   const table = () => getSupabase().from('user_progress');
   const { data, error } = await table()
-    .select('trivia_profile, vocabulary_profile, study_stats, user_vocabulary, incorrect_counts, updated_at')
+    .select(hasDataScienceColumn ? `${BASE_COLUMNS}, ${DATA_SCIENCE_COLUMN}` : BASE_COLUMNS)
     .eq('user_id', uid)
     .maybeSingle<RemoteRow>();
+  if (isMissingDataScienceColumn(error)) return dropDataScienceColumn();
   if (error) throw error;
   if (uid !== userId) return 'stale'; // signed out while the request was in flight
 
@@ -127,6 +146,8 @@ async function syncOnce(uid: string): Promise<SyncAttempt> {
   const merged: LocalSnapshot = {
     trivia: mergeProfiles(local.trivia, data?.trivia_profile),
     vocabulary: mergeProfiles(local.vocabulary, data?.vocabulary_profile),
+    // Without the column there's no cloud copy to merge, so keep the local one as is
+    dataScience: hasDataScienceColumn ? mergeProfiles(local.dataScience, data?.data_science_profile) : local.dataScience,
     stats: mergeStats(local.stats, data?.study_stats),
     userVocabulary: mergeVocabulary(local.userVocabulary, data?.user_vocabulary),
     incorrectCounts: mergeCounts(local.incorrectCounts, data?.incorrect_counts),
@@ -134,6 +155,7 @@ async function syncOnce(uid: string): Promise<SyncAttempt> {
 
   writeIfChanged(STORAGE_KEYS.TRIVIA_PROGRESS, merged.trivia);
   writeIfChanged(STORAGE_KEYS.VOCABULARY_PROGRESS, merged.vocabulary);
+  if (merged.dataScience) writeIfChanged(STORAGE_KEYS.DATA_SCIENCE_PROGRESS, merged.dataScience);
   writeIfChanged(STORAGE_KEYS.STUDY_STATS, merged.stats);
   writeIfChanged(STORAGE_KEYS.USER_VOCABULARY, merged.userVocabulary);
   writeIfChanged(STORAGE_KEYS.INCORRECT_COUNTS, merged.incorrectCounts);
@@ -155,18 +177,27 @@ async function syncOnce(uid: string): Promise<SyncAttempt> {
       .eq('user_id', uid)
       .eq('updated_at', data.updated_at)
       .select('user_id');
+    if (isMissingDataScienceColumn(writeError)) return dropDataScienceColumn();
     if (writeError) throw writeError;
     if (!written || written.length === 0) return 'conflict';
   } else if (data) {
     const { error: writeError } = await table().upsert({ user_id: uid, ...mergedRow, updated_at: updatedAt });
+    if (isMissingDataScienceColumn(writeError)) return dropDataScienceColumn();
     if (writeError) throw writeError;
   } else {
     const { error: writeError } = await table().insert({ user_id: uid, ...mergedRow, updated_at: updatedAt });
     // Another device created the row first: merge with it instead
     if (writeError?.code === '23505') return 'conflict';
+    if (isMissingDataScienceColumn(writeError)) return dropDataScienceColumn();
     if (writeError) throw writeError;
   }
   return 'done';
+}
+
+function dropDataScienceColumn(): SyncAttempt {
+  console.warn(`The user_progress table has no ${DATA_SCIENCE_COLUMN} column; run supabase_schema.sql to sync the Data Science deck.`);
+  hasDataScienceColumn = false;
+  return 'retry';
 }
 
 /**
@@ -189,6 +220,10 @@ async function sync(): Promise<void> {
   try {
     for (let attempt = 0; attempt < MAX_SYNC_ATTEMPTS; attempt++) {
       const result = await syncOnce(uid);
+      if (result === 'retry') {
+        attempt--; // happens at most once, when the column is found missing
+        continue;
+      }
       if (result === 'stale') return;
       if (result === 'done') {
         setStatus('synced');
@@ -243,6 +278,7 @@ export function flushPush(): Promise<void> {
 export function stopSync(): void {
   clearTimeout(pushTimer);
   userId = null;
+  hasDataScienceColumn = true; // re-check after the next sign-in, in case the schema was updated
   dirty = false;
   setStatus('idle');
 }

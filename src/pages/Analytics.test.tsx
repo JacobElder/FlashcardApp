@@ -24,5 +24,9 @@ describe('Analytics', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Vocabulary Data' }));
     expect(screen.getByRole('button', { name: 'Vocabulary Data' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('chart')).toHaveTextContent('2 points');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Data Science' }));
+    expect(screen.getByRole('button', { name: 'Data Science' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText(/Not enough data/)).toBeInTheDocument();
   });
 });

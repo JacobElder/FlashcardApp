@@ -116,7 +116,7 @@ export interface StudySession {
 }
 
 // Tab types
-export type TabType = 'trivia' | 'vocabulary' | 'analytics';
+export type TabType = 'trivia' | 'vocabulary' | 'data-science' | 'analytics';
 
 // Form data for adding new vocabulary
 export interface NewWordFormData {

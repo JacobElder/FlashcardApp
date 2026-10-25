@@ -54,6 +54,26 @@ const tabs: TabConfig[] = [
     ),
   },
   {
+    id: 'data-science',
+    label: 'Data Sci',
+    icon: (
+      <svg
+        className="w-6 h-6"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M7 21h10M9 3v6.5L4.5 17a2 2 0 001.7 3h11.6a2 2 0 001.7-3L15 9.5V3M8 3h8M7.5 14h9"
+        />
+      </svg>
+    ),
+  },
+  {
     id: 'analytics',
     label: 'Analytics',
     icon: (
