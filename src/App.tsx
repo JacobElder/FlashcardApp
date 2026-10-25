@@ -13,6 +13,7 @@ import type { Session } from '@supabase/supabase-js';
 // Split per tab so the auth screen and first tab load without the other decks or the charting library
 const TriviaStudy = lazy(() => import('./pages/TriviaStudy').then(m => ({ default: m.TriviaStudy })));
 const VocabularyStudy = lazy(() => import('./pages/VocabularyStudy').then(m => ({ default: m.VocabularyStudy })));
+const DataScienceStudy = lazy(() => import('./pages/DataScienceStudy').then(m => ({ default: m.DataScienceStudy })));
 const Analytics = lazy(() => import('./pages/Analytics').then(m => ({ default: m.Analytics })));
 
 function FullScreenMessage({ children }: { children: React.ReactNode }) {
@@ -147,6 +148,11 @@ function AuthenticatedApp() {
         {visitedTabs.has('vocabulary') && (
           <div hidden={activeTab !== 'vocabulary'}>
             <VocabularyStudy isActive={activeTab === 'vocabulary'} autoFocusCapture={openedForCapture} />
+          </div>
+        )}
+        {visitedTabs.has('data-science') && (
+          <div hidden={activeTab !== 'data-science'}>
+            <DataScienceStudy isActive={activeTab === 'data-science'} />
           </div>
         )}
         {visitedTabs.has('analytics') && (

@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { triviaCards } from './triviaCards';
+import { triviaCards, TRIVIA_CATEGORIES } from './triviaCards';
 import { vocabularyCards } from './vocabularyCards';
+import { dataScienceCards, DATA_SCIENCE_CATEGORIES } from './dataScienceCards';
 
-const CATEGORIES = ['Geography', 'History', 'Science', 'Pop Culture', 'Sports', 'Literature', 'Arts', 'Food & Drink', 'Music', 'Film/TV'];
+const CATEGORIES: readonly string[] = TRIVIA_CATEGORIES;
 const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 /** Category implied by each ID prefix. */
@@ -38,6 +39,7 @@ const DISTINCT_PAIRS = new Set([
 describe.each([
   ['trivia', triviaCards],
   ['vocabulary', vocabularyCards],
+  ['data science', dataScienceCards],
 ] as const)('%s deck', (_name, cards) => {
   it('has unique ids', () => {
     const ids = cards.map(c => c.id);
@@ -66,6 +68,17 @@ describe.each([
       c.options.some(o => normalize(o) === normalize(c.back))
     ));
     expect(bad.map(c => c.id)).toEqual([]);
+  });
+});
+
+describe('data science deck', () => {
+  it('uses only its declared categories', () => {
+    const allowed: readonly string[] = DATA_SCIENCE_CATEGORIES;
+    expect(dataScienceCards.filter(c => !allowed.includes(c.category)).map(c => c.id)).toEqual([]);
+  });
+
+  it('uses ds-N ids that no other deck uses', () => {
+    expect(dataScienceCards.filter(c => !/^ds-\d+$/.test(c.id)).map(c => c.id)).toEqual([]);
   });
 });
 

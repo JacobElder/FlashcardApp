@@ -15,10 +15,17 @@ import type { IRTProfile } from '../types';
 
 const EMPTY_PROFILE: IRTProfile = { ability: 0, cardHistory: {} };
 
-export function Analytics() {
-  const [activeDeck, setActiveDeck] = useState<'trivia' | 'vocabulary'>('trivia');
+const DECKS = [
+  { id: 'trivia', label: 'Trivia Data', key: STORAGE_KEYS.TRIVIA_PROGRESS },
+  { id: 'vocabulary', label: 'Vocabulary Data', key: STORAGE_KEYS.VOCABULARY_PROGRESS },
+  { id: 'data-science', label: 'Data Science', key: STORAGE_KEYS.DATA_SCIENCE_PROGRESS },
+] as const;
+type DeckId = (typeof DECKS)[number]['id'];
 
-  const profileKey = activeDeck === 'trivia' ? STORAGE_KEYS.TRIVIA_PROGRESS : STORAGE_KEYS.VOCABULARY_PROGRESS;
+export function Analytics() {
+  const [activeDeck, setActiveDeck] = useState<DeckId>('trivia');
+
+  const profileKey = DECKS.find(d => d.id === activeDeck)!.key;
   // Re-renders whenever the profile is written (studying, cloud sync, other tabs)
   const profile = useStorageValue<IRTProfile>(profileKey, EMPTY_PROFILE);
 
@@ -41,26 +48,19 @@ export function Analytics() {
         </header>
 
         <div className="flex bg-slate-800 rounded-lg p-1">
-          <button
-            type="button"
-            aria-pressed={activeDeck === 'trivia'}
-            onClick={() => setActiveDeck('trivia')}
-            className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
-              activeDeck === 'trivia' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            Trivia Data
-          </button>
-          <button
-            type="button"
-            aria-pressed={activeDeck === 'vocabulary'}
-            onClick={() => setActiveDeck('vocabulary')}
-            className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
-              activeDeck === 'vocabulary' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            Vocabulary Data
-          </button>
+          {DECKS.map(deck => (
+            <button
+              key={deck.id}
+              type="button"
+              aria-pressed={activeDeck === deck.id}
+              onClick={() => setActiveDeck(deck.id)}
+              className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
+                activeDeck === deck.id ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {deck.label}
+            </button>
+          ))}
         </div>
 
         <div className="bg-slate-800 rounded-xl p-6 shadow-xl border border-slate-700">

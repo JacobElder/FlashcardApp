@@ -17,6 +17,8 @@ const db = vi.hoisted(() => ({
   beforeWrite: null as (() => void) | null,
   /** Resolve to release a read that a test is holding open. */
   readGate: null as Promise<void> | null,
+  /** Columns the fake table lacks, as when the schema hasn't been updated yet. */
+  missingColumns: [] as string[],
 }));
 
 vi.mock('./supabase', () => {
@@ -28,10 +30,12 @@ vi.mock('./supabase', () => {
   return {
     getSupabase: () => ({
       from: () => ({
-        select: () => ({
+        select: (columns: string) => ({
           eq: () => ({
             maybeSingle: async () => {
               db.reads += 1;
+              const missing = db.missingColumns.find(c => columns.includes(c));
+              if (missing) return { data: null, error: { message: `column user_progress.${missing} does not exist`, code: '42703' } };
               if (db.readGate) await db.readGate;
               if (db.readThrows) throw db.readThrows;
               if (db.readError) return { data: null, error: db.readError };
@@ -60,6 +64,8 @@ vi.mock('./supabase', () => {
         },
         insert: async (values: Row) => {
           runBeforeWrite();
+          const missing = db.missingColumns.find(c => c in values);
+          if (missing) return { error: { message: `Could not find the '${missing}' column`, code: 'PGRST204' } };
           if (db.writeError) return { error: db.writeError };
           if (db.row) return { error: { message: 'duplicate key', code: '23505' } };
           db.row = values;
@@ -68,6 +74,8 @@ vi.mock('./supabase', () => {
         },
         upsert: async (values: Row) => {
           runBeforeWrite();
+          const missing = db.missingColumns.find(c => c in values);
+          if (missing) return { error: { message: `Could not find the '${missing}' column`, code: 'PGRST204' } };
           if (db.writeError) return { error: db.writeError };
           db.row = values;
           db.writes.push(values);
@@ -118,7 +126,9 @@ describe('cloud sync', () => {
     db.writeError = null;
     db.beforeWrite = null;
     db.readGate = null;
+    db.missingColumns = [];
     vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -143,6 +153,57 @@ describe('cloud sync', () => {
     setToStorage(STORAGE_KEYS.TRIVIA_PROGRESS, profile({ a: '2026-01-01' }));
     await startSync('user-1');
     expect(db.row).toMatchObject({ user_id: 'user-1' });
+    expect(cardIds(db.row!.trivia_profile)).toEqual(['a']);
+  });
+
+  it('merges Data Science progress like the other decks', async () => {
+    setToStorage(STORAGE_KEYS.DATA_SCIENCE_PROGRESS, profile({ 'ds-1': '2026-01-02' }));
+    seed({ data_science_profile: profile({ 'ds-2': '2026-01-01' }) });
+    await startSync('user-1');
+    expect(cardIds(getFromStorage(STORAGE_KEYS.DATA_SCIENCE_PROGRESS, null))).toEqual(['ds-1', 'ds-2']);
+    expect(cardIds(db.row!.data_science_profile)).toEqual(['ds-1', 'ds-2']);
+  });
+
+  it('keeps syncing the other decks when the database has no Data Science column yet', async () => {
+    db.missingColumns = ['data_science_profile'];
+    setToStorage(STORAGE_KEYS.DATA_SCIENCE_PROGRESS, profile({ 'ds-1': '2026-01-02' }));
+    setToStorage(STORAGE_KEYS.TRIVIA_PROGRESS, profile({ local: '2026-01-02' }));
+    seed({ trivia_profile: profile({ remote: '2026-01-01' }) });
+
+    await startSync('user-1');
+
+    expect(getSyncStatus().status).toBe('synced');
+    expect(cardIds(db.row!.trivia_profile)).toEqual(['local', 'remote']);
+    expect(db.row).not.toHaveProperty('data_science_profile');
+    // The deck's progress stays on this device until the column exists
+    expect(cardIds(getFromStorage(STORAGE_KEYS.DATA_SCIENCE_PROGRESS, null))).toEqual(['ds-1']);
+  });
+
+  it('merges user facts so an answer filled in elsewhere reaches this device', async () => {
+    const fact = (status: string, updatedAt: string) => ({
+      id: 'f1', deck: 'trivia', category: 'History', question: 'q', answer: 'a', status, addedAt: '2026-01-01', updatedAt,
+    });
+    setToStorage(STORAGE_KEYS.USER_FACTS, { facts: [fact('needs_check', '2026-01-01')], deletedIds: [], lastUpdated: '2026-01-01' });
+    seed({ user_facts: { facts: [fact('verified', '2026-01-02')], deletedIds: [], lastUpdated: '2026-01-02' } });
+    await startSync('user-1');
+    expect(getFromStorage<{ facts: { status: string }[] }>(STORAGE_KEYS.USER_FACTS, { facts: [] }).facts[0].status).toBe('verified');
+  });
+
+  it('skips each missing optional column separately', async () => {
+    db.missingColumns = ['data_science_profile', 'user_facts'];
+    setToStorage(STORAGE_KEYS.TRIVIA_PROGRESS, profile({ a: '2026-01-01' }));
+    seed({});
+    await startSync('user-1');
+    expect(getSyncStatus().status).toBe('synced');
+    expect(db.row).not.toHaveProperty('user_facts');
+    expect(cardIds(db.row!.trivia_profile)).toEqual(['a']);
+  });
+
+  it('creates the row without the Data Science column when the database lacks it', async () => {
+    db.missingColumns = ['data_science_profile'];
+    setToStorage(STORAGE_KEYS.TRIVIA_PROGRESS, profile({ a: '2026-01-01' }));
+    await startSync('user-1');
+    expect(getSyncStatus().status).toBe('synced');
     expect(cardIds(db.row!.trivia_profile)).toEqual(['a']);
   });
 

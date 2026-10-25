@@ -3,7 +3,9 @@ import type { IRTCardHistory, NewWordFormData, PendingWord, UserVocabulary, Voca
 export const STORAGE_KEYS = {
   TRIVIA_PROGRESS: 'nyc-trivia-progress',
   VOCABULARY_PROGRESS: 'nyc-vocabulary-progress',
+  DATA_SCIENCE_PROGRESS: 'nyc-data-science-progress',
   USER_VOCABULARY: 'nyc-user-vocabulary',
+  USER_FACTS: 'nyc-user-facts',
   STUDY_STATS: 'nyc-study-stats',
   INCORRECT_COUNTS: 'nyc-incorrect-counts',
   /** Supabase user id the local data belongs to. */
@@ -14,7 +16,9 @@ export const STORAGE_KEYS = {
 export const SYNCED_KEYS: readonly string[] = [
   STORAGE_KEYS.TRIVIA_PROGRESS,
   STORAGE_KEYS.VOCABULARY_PROGRESS,
+  STORAGE_KEYS.DATA_SCIENCE_PROGRESS,
   STORAGE_KEYS.USER_VOCABULARY,
+  STORAGE_KEYS.USER_FACTS,
   STORAGE_KEYS.STUDY_STATS,
   STORAGE_KEYS.INCORRECT_COUNTS,
 ];

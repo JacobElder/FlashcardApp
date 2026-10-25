@@ -14,7 +14,9 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "words:pending": "node --env-file=.env.local scripts/pending-words.mjs list",
-    "words:apply": "node --env-file=.env.local scripts/pending-words.mjs apply"
+    "words:apply": "node --env-file=.env.local scripts/pending-words.mjs apply",
+    "facts:pending": "node --env-file=.env.local scripts/pending-facts.mjs list",
+    "facts:apply": "node --env-file=.env.local scripts/pending-facts.mjs apply"
   },
   "repository": {
     "type": "git",

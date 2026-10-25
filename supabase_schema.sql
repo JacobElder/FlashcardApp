@@ -9,12 +9,16 @@ CREATE TABLE IF NOT EXISTS user_progress (
   study_stats JSONB NOT NULL DEFAULT '{}'::jsonb,
   user_vocabulary JSONB NOT NULL DEFAULT '{}'::jsonb,
   incorrect_counts JSONB NOT NULL DEFAULT '{}'::jsonb,
+  data_science_profile JSONB NOT NULL DEFAULT '{}'::jsonb,
+  user_facts JSONB NOT NULL DEFAULT '{}'::jsonb,
   updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
 -- Upgrade an existing table created by the original schema
 ALTER TABLE user_progress ADD COLUMN IF NOT EXISTS user_vocabulary JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE user_progress ADD COLUMN IF NOT EXISTS incorrect_counts JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE user_progress ADD COLUMN IF NOT EXISTS data_science_profile JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE user_progress ADD COLUMN IF NOT EXISTS user_facts JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 -- Deleting a user account should delete their progress instead of being blocked by it
 ALTER TABLE user_progress DROP CONSTRAINT IF EXISTS user_progress_user_id_fkey;
