@@ -63,7 +63,8 @@ describe('App', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Sign Out' }));
     await vi.waitFor(() => expect(mock().auth.signOut).toHaveBeenCalled());
-  });
+    // Renders the whole app (~1.5s alone); under coverage with every file running it can pass 5s
+  }, 20_000);
 
   it('shows the sign-in screen when signed out', async () => {
     render(<App />);
