@@ -27,9 +27,11 @@ ALTER TABLE user_progress
 --    written by the app; drop it if it exists and is empty.
 DO $$
 BEGIN
-  IF to_regclass('public.user_vocabulary') IS NOT NULL
-     AND NOT EXISTS (SELECT 1 FROM public.user_vocabulary) THEN
-    DROP TABLE public.user_vocabulary;
+  -- Nested so the SELECT is only planned when the table exists
+  IF to_regclass('public.user_vocabulary') IS NOT NULL THEN
+    IF NOT EXISTS (SELECT 1 FROM public.user_vocabulary) THEN
+      DROP TABLE public.user_vocabulary;
+    END IF;
   END IF;
 END $$;
 
