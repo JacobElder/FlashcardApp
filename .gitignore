@@ -1,7 +1,9 @@
 node_modules/
 dist/
 .DS_Store
-.claude/
+# Claude Code: share the project's slash commands, keep personal settings local
+.claude/*
+!.claude/commands/
 *.local
 __pycache__/
 *.pyc
