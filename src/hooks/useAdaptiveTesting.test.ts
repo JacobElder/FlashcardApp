@@ -374,3 +374,20 @@ describe('useAdaptiveTesting rules that need their own check', () => {
     expect(readProfile().cardHistory.a.timesAnswered).toBe(2);
   });
 });
+
+describe('correct-answer streak', () => {
+  it('counts correct answers in a row and resets on a miss', () => {
+    const one = [cards[0]];
+    const { result } = renderHook(() => useAdaptiveTesting({ cards: one, storageKey: KEY, ignoreSchedule: true }));
+    const streak = () => readProfile().cardHistory.a.correctStreak;
+    const rate = (rating: (typeof RATING_VALUES)[keyof typeof RATING_VALUES]) => {
+      act(() => result.current.rateCard(rating));
+      act(() => result.current.resetSession());
+    };
+    rate(RATING_VALUES.good);
+    rate(RATING_VALUES.hard);
+    expect(streak()).toBe(2);
+    rate(RATING_VALUES.again);
+    expect(streak()).toBe(0);
+  });
+});

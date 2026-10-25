@@ -14,6 +14,7 @@ import {
   incrementIncorrectCount,
   getIncorrectCounts,
   troubleCardIdsFrom,
+  TROUBLE_GRADUATION_STREAK,
   clearAllData,
   localDateString,
   subscribeToStorage,
@@ -276,5 +277,20 @@ describe('storage rules that need their own check', () => {
     vi.setSystemTime(new Date('2026-03-02T10:00:00Z'));
     markPendingNotFound('p');
     expect(getUserVocabulary()).toBe(first); // no new write, so a sync isn't triggered for nothing
+  });
+});
+
+describe('trouble cards', () => {
+  const history = (correctStreak?: number) => ({ cardId: 'a', timesAnswered: 3, timesCorrect: 1, correctStreak });
+
+  it('stays on the list until answered correctly enough times in a row', () => {
+    const counts = { a: 2 };
+    expect([...troubleCardIdsFrom(counts, {})]).toEqual(['a']);
+    expect([...troubleCardIdsFrom(counts, { a: history(TROUBLE_GRADUATION_STREAK - 1) })]).toEqual(['a']);
+    expect([...troubleCardIdsFrom(counts, { a: history(TROUBLE_GRADUATION_STREAK) })]).toEqual([]);
+  });
+
+  it('keeps a card saved before streaks existed on the list', () => {
+    expect([...troubleCardIdsFrom({ a: 5 }, { a: history(undefined) })]).toEqual(['a']);
   });
 });

@@ -115,6 +115,20 @@ describe('TriviaStudy', () => {
     expect(screen.getByRole('heading', { name: 'Session Complete!' })).toBeInTheDocument();
   });
 
+  it('takes a card off the trouble list once it is answered correctly 3 times in a row', () => {
+    const profile = notDue(['geo-1']);
+    profile.cardHistory['geo-1'].correctStreak = 2;
+    setToStorage(STORAGE_KEYS.TRIVIA_PROGRESS, profile);
+    setToStorage(STORAGE_KEYS.INCORRECT_COUNTS, { 'geo-1': 2 });
+    render(<TriviaStudy isActive />);
+    expect(screen.getByRole('button', { name: /Trouble/ })).toHaveTextContent('Trouble (1)');
+
+    fireEvent.click(screen.getByRole('button', { name: /Trouble/ }));
+    expect(question()).toBe('geo-1');
+    answerGood();
+    expect(screen.getByRole('button', { name: /Trouble/ })).toHaveTextContent(/^⚠ Trouble$/);
+  });
+
   it('explains a session where every remaining card was skipped', () => {
     render(<TriviaStudy isActive />);
     for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole('button', { name: 'Skip' }));

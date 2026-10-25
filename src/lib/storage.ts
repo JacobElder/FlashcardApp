@@ -1,4 +1,4 @@
-import type { NewWordFormData, PendingWord, UserVocabulary, VocabularyCard } from '../types';
+import type { IRTCardHistory, NewWordFormData, PendingWord, UserVocabulary, VocabularyCard } from '../types';
 
 export const STORAGE_KEYS = {
   TRIVIA_PROGRESS: 'nyc-trivia-progress',
@@ -303,9 +303,24 @@ export function incrementIncorrectCount(cardId: string): void {
   setToStorage(STORAGE_KEYS.INCORRECT_COUNTS, { ...counts, [cardId]: (counts[cardId] ?? 0) + 1 });
 }
 
-/** Cards missed more than once. */
-export function troubleCardIdsFrom(counts: Record<string, number>): Set<string> {
-  return new Set(Object.entries(counts).filter(([, n]) => n > 1).map(([id]) => id));
+/** Correct answers in a row that take a card off the trouble list. */
+export const TROUBLE_GRADUATION_STREAK = 3;
+
+/**
+ * Cards missed more than once that haven't since been answered correctly
+ * TROUBLE_GRADUATION_STREAK times in a row. The streak lives in the card's
+ * history rather than lowering the miss count, because sync keeps the larger
+ * miss count from either device and would undo a decrease.
+ */
+export function troubleCardIdsFrom(
+  counts: Record<string, number>,
+  cardHistory: Record<string, IRTCardHistory> = {}
+): Set<string> {
+  return new Set(
+    Object.entries(counts)
+      .filter(([id, n]) => n > 1 && (cardHistory[id]?.correctStreak ?? 0) < TROUBLE_GRADUATION_STREAK)
+      .map(([id]) => id)
+  );
 }
 
 // Ownership: which signed-in user the local data belongs to

@@ -13,12 +13,15 @@ import {
   STORAGE_KEYS,
   EMPTY_STUDY_STATS,
   currentStreak,
+  TROUBLE_GRADUATION_STREAK,
   troubleCardIdsFrom,
   type StudyStats,
 } from '../lib/storage';
+import type { IRTProfile } from '../types';
 import { triviaCards } from '../data/triviaCards';
 
 const NO_COUNTS: Record<string, number> = {};
+const EMPTY_PROFILE: IRTProfile = { ability: 0, cardHistory: {} };
 
 interface TriviaStudyProps {
   /** Whether this tab is visible (keyboard shortcuts only apply then). */
@@ -31,9 +34,13 @@ export function TriviaStudy({ isActive }: TriviaStudyProps) {
   const stats = useStorageValue<StudyStats>(STORAGE_KEYS.STUDY_STATS, EMPTY_STUDY_STATS);
   const streak = currentStreak(stats);
 
-  // Incorrect counts determine which cards are "trouble" cards
+  // Cards missed more than once are "trouble" cards until answered correctly a few times in a row
   const incorrectCounts = useStorageValue(STORAGE_KEYS.INCORRECT_COUNTS, NO_COUNTS);
-  const troubleCardIds = useMemo(() => troubleCardIdsFrom(incorrectCounts), [incorrectCounts]);
+  const { cardHistory } = useStorageValue<IRTProfile>(STORAGE_KEYS.TRIVIA_PROGRESS, EMPTY_PROFILE);
+  const troubleCardIds = useMemo(
+    () => troubleCardIdsFrom(incorrectCounts, cardHistory),
+    [incorrectCounts, cardHistory]
+  );
 
   const categories = useMemo(
     () => ['All', ...Array.from(new Set(triviaCards.map(c => c.category))).sort()],
@@ -179,7 +186,7 @@ export function TriviaStudy({ isActive }: TriviaStudyProps) {
           ) : troubleOnly && troubleCount === 0 ? (
             <EmptyState
               title="No Trouble Cards Yet"
-              description="Keep studying — cards you miss more than once will appear here."
+              description={`Keep studying — cards you miss more than once appear here until you get them right ${TROUBLE_GRADUATION_STREAK} times in a row.`}
               icon="cards"
               action={{ label: 'Back to All', onClick: () => changeFilter(selectedCategory, false) }}
             />

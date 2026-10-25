@@ -45,6 +45,8 @@ export interface IRTCardHistory {
   estMcDifficulty?: number;
   mcTimesAnswered?: number;
   mcTimesCorrect?: number;
+  /** Correct answers in a row (either format); a miss resets it. Lets trouble cards graduate. */
+  correctStreak?: number;
 }
 
 export interface IRTProfile {

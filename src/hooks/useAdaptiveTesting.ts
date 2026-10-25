@@ -221,6 +221,7 @@ export function useAdaptiveTesting({
       lastAnsweredDate: now.toISOString(),
       leitnerBox: box,
       nextReviewDate: nextReview.toISOString(),
+      correctStreak: isCorrect ? (history.correctStreak ?? 0) + 1 : 0,
       ...(isMc
         ? {
             mcTimesAnswered: answeredInFormat + 1,
