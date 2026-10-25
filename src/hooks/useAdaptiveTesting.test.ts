@@ -3,7 +3,7 @@ import { act, renderHook } from '@testing-library/react';
 import { nextBox, useAdaptiveTesting } from './useAdaptiveTesting';
 import { MAX_ABILITY_HISTORY } from '../lib/merge';
 import { RATING_VALUES, type FlashCard, type IRTProfile } from '../types';
-import { STORAGE_KEYS, getFromStorage, getIncorrectCounts, setToStorage } from '../lib/storage';
+import { STORAGE_KEYS, getFromStorage, getIncorrectCounts, getStudyStats, setToStorage } from '../lib/storage';
 
 const KEY = STORAGE_KEYS.TRIVIA_PROGRESS;
 const cards: FlashCard[] = ['a', 'b', 'c', 'd'].map(id => ({
@@ -319,5 +319,58 @@ describe('useAdaptiveTesting session details', () => {
     // Prior info 1 + item info 0.25 at P = 0.5; score 0.5 -> step 0.5 / 1.25
     expect(readProfile().ability).toBeCloseTo(0.4, 5);
     expect(readProfile().abilityInfo).toBeCloseTo(1.25, 5);
+  });
+});
+
+// Each test below fails if a specific session rule is removed (found by mutation testing)
+describe('useAdaptiveTesting rules that need their own check', () => {
+  it('scores each prediction against the answer that followed it', () => {
+    const { result } = render();
+    act(() => result.current.recordPrediction('know'));
+    act(() => result.current.rateCard(RATING_VALUES.again));
+    expect(result.current.session.predictions).toEqual({ total: 1, correct: 0 });
+
+    act(() => result.current.recordPrediction('unsure'));
+    act(() => result.current.rateCard(RATING_VALUES.again));
+    expect(result.current.session.predictions).toEqual({ total: 2, correct: 1 });
+  });
+
+  it('counts misses as misses in the lifetime stats', () => {
+    const { result } = render();
+    act(() => result.current.rateCard(RATING_VALUES.again));
+    act(() => result.current.rateCard(RATING_VALUES.good));
+    expect(getStudyStats()).toMatchObject({ totalCardsReviewed: 2, totalCorrect: 1, totalIncorrect: 1 });
+  });
+
+  it('does not add newly due cards while a session is under way', () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-03-10T12:00:00Z') });
+    const tomorrow = '2026-03-11T04:00:00.000Z';
+    setToStorage<IRTProfile>(KEY, {
+      ability: 0,
+      cardHistory: {
+        c: { cardId: 'c', timesAnswered: 1, timesCorrect: 1, nextReviewDate: tomorrow },
+        d: { cardId: 'd', timesAnswered: 1, timesCorrect: 1, nextReviewDate: tomorrow },
+      },
+    });
+    const { result } = render();
+    expect(result.current.dueCount).toBe(2); // a and b are new
+    act(() => result.current.rateCard(RATING_VALUES.good));
+
+    vi.setSystemTime(new Date('2026-03-11T09:00:00Z'));
+    act(() => { window.dispatchEvent(new Event('focus')); });
+    expect(result.current.dueCount).toBe(1);
+  });
+
+  it('lets a card be rated again after the session is restarted', () => {
+    const one = [cards[0]];
+    const { result } = renderHook(() => useAdaptiveTesting({ cards: one, storageKey: KEY }));
+    // "Again" keeps the card due right away, so the restarted session offers it again
+    act(() => result.current.rateCard(RATING_VALUES.again));
+    expect(result.current.hasMoreCards).toBe(false);
+
+    act(() => result.current.resetSession());
+    act(() => result.current.rateCard(RATING_VALUES.again));
+    expect(result.current.session.cardsReviewed).toBe(1);
+    expect(readProfile().cardHistory.a.timesAnswered).toBe(2);
   });
 });

@@ -19,6 +19,7 @@ import {
   subscribeToStorage,
   subscribeToStorageErrors,
   hasStorageWriteFailed,
+  markPendingNotFound,
 } from './storage';
 import type { VocabularyCard } from '../types';
 
@@ -242,5 +243,38 @@ describe('storage failures and other tabs', () => {
     vi.setSystemTime(new Date('2026-03-02T10:00:00Z'));
     updateUserWord(word.id, { definition: 'changed' });
     expect(getUserVocabulary().words[0]).toMatchObject({ definition: 'changed', updatedAt: '2026-03-02T10:00:00.000Z' });
+  });
+});
+
+// Each test below fails if a specific storage rule is removed (found by mutation testing)
+describe('storage rules that need their own check', () => {
+  it('keeps the streak alive on the day after the last study day', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 4, 10, 12));
+    updateStudyStats(1, 0);
+    vi.setSystemTime(new Date(2026, 4, 11, 20));
+    expect(currentStreak(getStudyStats())).toBe(1);
+  });
+
+  it('stamps a newly added word with its own edit time', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-01T10:00:00Z'));
+    addUserWord(word);
+    expect(getUserVocabulary().words[0].updatedAt).toBe('2026-03-01T10:00:00.000Z');
+  });
+
+  it('does not rewrite a word already marked not found', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-01T10:00:00Z'));
+    setToStorage(STORAGE_KEYS.USER_VOCABULARY, {
+      words: [], deletedIds: [], lastUpdated: '', pending: [{ id: 'p', word: 'zzxq', addedAt: '2026-03-01', status: 'queued' }],
+    });
+    markPendingNotFound('p');
+    const first = getUserVocabulary();
+    expect(first.pending?.[0].status).toBe('not_found');
+
+    vi.setSystemTime(new Date('2026-03-02T10:00:00Z'));
+    markPendingNotFound('p');
+    expect(getUserVocabulary()).toBe(first); // no new write, so a sync isn't triggered for nothing
   });
 });

@@ -187,3 +187,53 @@ describe('mergeStats', () => {
     expect(merged).toEqual({ totalCardsReviewed: 3, totalCorrect: 2, totalIncorrect: 1, lastStudyDate: '2026-01-02', streak: 0 });
   });
 });
+
+// Each test below fails if a specific merge rule is removed (found by mutation testing)
+describe('merge rules that need their own check', () => {
+  it('sorts ability history even when the remote copy has the earlier points', () => {
+    const merged = mergeProfiles(
+      { ability: 0, cardHistory: {}, abilityHistory: [{ date: '2026-01-03', ability: 3 }] },
+      { ability: 0, cardHistory: {}, abilityHistory: [{ date: '2026-01-01', ability: 1 }, { date: '2026-01-02', ability: 2 }] }
+    );
+    expect(merged.abilityHistory!.map(p => p.date)).toEqual(['2026-01-01', '2026-01-02', '2026-01-03']);
+  });
+
+  it('drops corrupt card entries from the remote copy', () => {
+    const remote = { ability: 0, cardHistory: { b: entry('b', '2026-01-01', 1), junk: 'x', empty: null } };
+    const merged = mergeProfiles(
+      { ability: 0, cardHistory: { a: entry('a', '2026-01-01', 1) } },
+      remote as unknown as IRTProfile
+    );
+    expect(Object.keys(merged.cardHistory).sort()).toEqual(['a', 'b']);
+  });
+
+  it('keeps the newer updatedAt whichever side it comes from', () => {
+    const older: IRTProfile = { ability: 0, cardHistory: {}, updatedAt: '2026-01-01' };
+    const newer: IRTProfile = { ability: 1, cardHistory: {}, updatedAt: '2026-01-02' };
+    expect(mergeProfiles(older, newer).updatedAt).toBe('2026-01-02');
+    expect(mergeProfiles(newer, older).updatedAt).toBe('2026-01-02');
+  });
+
+  it('gives a word edited at the same moment on both devices to the more recently edited list', () => {
+    const stamp = '2026-01-01T00:00:00Z';
+    const newerList = { words: [word('a', 'newer list', stamp)], lastUpdated: '2026-01-02' };
+    const olderList = { words: [word('a', 'older list', stamp)], lastUpdated: '2026-01-01' };
+    expect(mergeVocabulary(newerList, olderList).words[0].definition).toBe('newer list');
+    expect(mergeVocabulary(olderList, newerList).words[0].definition).toBe('newer list');
+  });
+
+  it('keeps the newer vocabulary edit time whichever side it comes from', () => {
+    const older = { words: [word('a')], lastUpdated: '2026-01-01' };
+    const newer = { words: [word('a')], lastUpdated: '2026-01-02' };
+    expect(mergeVocabulary(older, newer).lastUpdated).toBe('2026-01-02');
+    expect(mergeVocabulary(newer, older).lastUpdated).toBe('2026-01-02');
+  });
+
+  it('takes each stats total from whichever side is larger', () => {
+    const small = { totalCardsReviewed: 5, totalCorrect: 3, totalIncorrect: 2, lastStudyDate: '2026-01-01', streak: 1 };
+    const big = { totalCardsReviewed: 9, totalCorrect: 6, totalIncorrect: 3, lastStudyDate: '2026-01-01', streak: 1 };
+    for (const merged of [mergeStats(small, big), mergeStats(big, small)]) {
+      expect(merged).toMatchObject({ totalCardsReviewed: 9, totalCorrect: 6, totalIncorrect: 3 });
+    }
+  });
+});

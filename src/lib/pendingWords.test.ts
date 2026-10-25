@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { resolvePendingWords, startPendingWordResolver } from './pendingWords';
 import { lookupWord } from './dictionary';
-import { getUserVocabulary, queuePendingWords, removePendingWord, resolvePendingWord } from './storage';
+import { STORAGE_KEYS, getStudyStats, getUserVocabulary, queuePendingWords, removePendingWord, resolvePendingWord, setToStorage, setUserVocabulary } from './storage';
 import { mergeVocabulary } from './merge';
 import { splitWords } from '../components/QuickCapture';
 
@@ -173,5 +173,25 @@ describe('lookupWord', () => {
       [{ meanings: [{ partOfSpeech: '', definitions: [{ definition: 'd', example: '' }] }] }]
     ), { status: 200 }));
     expect(await lookupWord(' word ')).toEqual({ definition: 'd', partOfSpeech: undefined, example: undefined });
+  });
+});
+
+// Fails if the resolver reacts to every storage change (found by mutation testing)
+describe('startPendingWordResolver triggers', () => {
+  it('looks words up when the vocabulary changes, not when other data does', async () => {
+    const fetchSpy = mockDictionary({ laconic: found('Using few words.') });
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    queuePendingWords(['laconic'], []);
+    const stop = startPendingWordResolver(); // offline, so nothing is looked up yet
+    online.mockReturnValue(true);
+
+    setToStorage(STORAGE_KEYS.STUDY_STATS, { ...getStudyStats(), totalCardsReviewed: 1 });
+    await new Promise(resolve => setTimeout(resolve, 0)); // let any triggered lookup start
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    setUserVocabulary({ ...getUserVocabulary(), lastUpdated: new Date().toISOString() });
+    await vi.waitFor(() => expect(getUserVocabulary().words.map(w => w.word)).toEqual(['laconic']));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    stop();
   });
 });

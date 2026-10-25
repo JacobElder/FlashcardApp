@@ -251,3 +251,54 @@ describe('migrateProfile review dates', () => {
     expect(migrated.cardHistory.a.nextReviewDate).toBe('2026-03-02T15:00:00.000Z');
   });
 });
+
+// Each test below fails if a specific scheduling rule is removed (found by mutation testing)
+describe('scheduling rules that need their own check', () => {
+  const item = { difficulty: 0, discrimination: 1, guessing: 0 };
+  const now = new Date('2026-01-10T12:00:00Z').getTime();
+  const answered = (cardId: string, nextReviewDate: string) =>
+    ({ cardId, timesAnswered: 1, timesCorrect: 1, nextReviewDate });
+
+  it('keeps moving ability by a minimum step after hundreds of answers', () => {
+    // p = 0.5 at ability = difficulty, so the move is step * 0.5 with the 0.05 floor
+    expect(updateAbility({ ability: 0, info: 1e6 }, item, true).ability).toBeCloseTo(0.025);
+  });
+
+  it('adjusts a card\'s difficulty less once it has many answers, but never stops', () => {
+    const early = updateItemDifficulty(0, item, false, 0);
+    const late = updateItemDifficulty(0, item, false, 50);
+    expect(late).toBeLessThan(early);
+    expect(late).toBeCloseTo(0.025); // floor of 0.05 * (p - 0) at p = 0.5
+  });
+
+  it('treats multiple choice as easier than open recall when not authored', () => {
+    const c = card('a', { difficulty: 1, options: ['x', 'y', 'z'] });
+    expect(getItemParams(c, undefined, 'mc').difficulty).toBeLessThan(getItemParams(c, undefined, 'open').difficulty);
+  });
+
+  it('ranks a not-yet-due card below a new card even when it would be more informative', () => {
+    const cards = [card('notDue', { difficulty: 0 }), card('new', { difficulty: 2 })];
+    const history = { notDue: answered('notDue', '2026-02-01T00:00:00Z') };
+    for (let i = 0; i < 20; i++) expect(selectNextCard(0, cards, history, {}, now)?.card.id).toBe('new');
+  });
+
+  it('ranks a long-overdue card above a just-due one that would be slightly more informative', () => {
+    const cards = [card('justDue', { difficulty: 0 }), card('longOverdue', { difficulty: 1.5 })];
+    const history = {
+      justDue: answered('justDue', '2026-01-10T12:00:00Z'),
+      longOverdue: answered('longOverdue', '2025-12-26T12:00:00Z'), // 15 days overdue
+    };
+    for (let i = 0; i < 20; i++) expect(selectNextCard(0, cards, history, {}, now)?.card.id).toBe('longOverdue');
+  });
+
+  it('adds legacy MC answers to MC answers already on the card', () => {
+    const migrated = migrateProfile({
+      ability: 0,
+      cardHistory: {
+        a: { cardId: 'a', timesAnswered: 1, timesCorrect: 1, mcTimesAnswered: 2, mcTimesCorrect: 1 },
+        'a-mc': { cardId: 'a-mc', timesAnswered: 3, timesCorrect: 2 },
+      },
+    })!;
+    expect(migrated.cardHistory.a).toMatchObject({ mcTimesAnswered: 5, mcTimesCorrect: 3 });
+  });
+});

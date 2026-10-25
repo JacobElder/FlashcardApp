@@ -325,6 +325,42 @@ describe('cloud sync', () => {
     expect(getSyncStatus().status).toBe('idle');
   });
 
+  it('downloads cloud progress as soon as the device reconnects, even with no local changes', async () => {
+    seed({ trivia_profile: profile({ remoteCard: '2026-01-01' }) });
+    setOnline(false);
+    await startSync('user-1');
+    expect(db.reads).toBe(0);
+
+    setOnline(true);
+    window.dispatchEvent(new Event('online'));
+    await settle(); // nothing is unsynced, so only the reconnect can start this sync
+
+    expect(db.reads).toBe(1);
+    expect(cardIds(localTrivia())).toEqual(['remoteCard']);
+    expect(getSyncStatus().status).toBe('synced');
+  });
+
+  it('shows no error for a sync that fails after sign-out', async () => {
+    let release!: () => void;
+    db.readGate = new Promise(resolve => { release = resolve; });
+    db.readThrows = new Error('network down');
+    const done = startSync('user-1');
+    await Promise.resolve();
+    stopSync();
+    release();
+    await done;
+
+    expect(getSyncStatus()).toEqual({ status: 'idle', error: null });
+    expect(hasUnsyncedChanges()).toBe(false);
+  });
+
+  it('syncs only once when started twice for the same user', async () => {
+    seed({ trivia_profile: profile({ remote: '2026-01-01' }) });
+    await Promise.all([startSync('user-1'), startSync('user-1')]);
+    await startSync('user-1');
+    expect(db.reads).toBe(1);
+  });
+
   it('flushes when the page is hidden and re-syncs on return after a minute', async () => {
     const now = vi.spyOn(Date, 'now');
     now.mockReturnValue(1_000_000);
