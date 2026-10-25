@@ -1,5 +1,10 @@
 import type { TriviaCard } from '../types';
 
+export const TRIVIA_CATEGORIES = [
+  'Geography', 'History', 'Science', 'Pop Culture', 'Sports',
+  'Literature', 'Arts', 'Food & Drink', 'Music', 'Film/TV',
+] as const;
+
 export const triviaCards: TriviaCard[] = [
   // GEOGRAPHY
   { id: 'geo-1', type: 'trivia', category: 'Geography', front: 'What is the capital of Australia?', back: 'Canberra', options: ["Sydney","Melbourne","Brisbane"], difficulty: 1, discrimination: 1.5 },

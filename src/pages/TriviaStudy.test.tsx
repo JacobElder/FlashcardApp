@@ -9,7 +9,7 @@ const deck = vi.hoisted(() => {
   return { card, cards: [card('geo-1', 'Geography'), card('geo-2', 'Geography'), card('sci-1', 'Science')] };
 });
 // The page reads the array at render time, so a test can add a card before rendering
-vi.mock('../data/triviaCards', () => ({ triviaCards: deck.cards }));
+vi.mock('../data/triviaCards', () => ({ triviaCards: deck.cards, TRIVIA_CATEGORIES: ['Geography', 'Science'] }));
 
 import { TriviaStudy } from './TriviaStudy';
 import { STORAGE_KEYS, setToStorage } from '../lib/storage';
@@ -30,6 +30,17 @@ const answerGood = () => {
 describe('TriviaStudy', () => {
   beforeEach(() => {
     vi.spyOn(Math, 'random').mockReturnValue(0);
+  });
+
+  it('studies the user\'s own answered facts alongside the deck, but not unanswered ones', () => {
+    const fact = (id: string, answer?: string) => ({
+      id, deck: 'trivia', category: 'Science', question: `My ${id}`, ...(answer ? { answer } : {}),
+      status: answer ? 'needs_check' : 'needs_answer', addedAt: '2026-01-01', updatedAt: '2026-01-01',
+    });
+    setToStorage(STORAGE_KEYS.USER_FACTS, { facts: [fact('f1', 'Yes'), fact('f2')], deletedIds: [], lastUpdated: '2026-01-01' });
+    render(<TriviaStudy isActive />);
+    const total = within(screen.getByText('Total Cards').parentElement!).getByText(/^\d+$/).textContent;
+    expect(total).toBe(String(deck.cards.length + 1));
   });
 
   it('asks for a confidence prediction, then offers ratings once the answer is shown', () => {

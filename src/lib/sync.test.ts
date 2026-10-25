@@ -179,6 +179,26 @@ describe('cloud sync', () => {
     expect(cardIds(getFromStorage(STORAGE_KEYS.DATA_SCIENCE_PROGRESS, null))).toEqual(['ds-1']);
   });
 
+  it('merges user facts so an answer filled in elsewhere reaches this device', async () => {
+    const fact = (status: string, updatedAt: string) => ({
+      id: 'f1', deck: 'trivia', category: 'History', question: 'q', answer: 'a', status, addedAt: '2026-01-01', updatedAt,
+    });
+    setToStorage(STORAGE_KEYS.USER_FACTS, { facts: [fact('needs_check', '2026-01-01')], deletedIds: [], lastUpdated: '2026-01-01' });
+    seed({ user_facts: { facts: [fact('verified', '2026-01-02')], deletedIds: [], lastUpdated: '2026-01-02' } });
+    await startSync('user-1');
+    expect(getFromStorage<{ facts: { status: string }[] }>(STORAGE_KEYS.USER_FACTS, { facts: [] }).facts[0].status).toBe('verified');
+  });
+
+  it('skips each missing optional column separately', async () => {
+    db.missingColumns = ['data_science_profile', 'user_facts'];
+    setToStorage(STORAGE_KEYS.TRIVIA_PROGRESS, profile({ a: '2026-01-01' }));
+    seed({});
+    await startSync('user-1');
+    expect(getSyncStatus().status).toBe('synced');
+    expect(db.row).not.toHaveProperty('user_facts');
+    expect(cardIds(db.row!.trivia_profile)).toEqual(['a']);
+  });
+
   it('creates the row without the Data Science column when the database lacks it', async () => {
     db.missingColumns = ['data_science_profile'];
     setToStorage(STORAGE_KEYS.TRIVIA_PROGRESS, profile({ a: '2026-01-01' }));

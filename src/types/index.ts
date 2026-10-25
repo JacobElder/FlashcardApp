@@ -102,6 +102,40 @@ export interface UserVocabulary {
   lastUpdated: string;
 }
 
+/** Which study tab a user-added fact belongs to. */
+export type FactDeck = 'trivia' | 'data-science';
+
+/**
+ * needs_answer: question only, waiting for Claude to research the answer.
+ * needs_check: has the user's answer (studied already), waiting to be fact-checked.
+ * verified: Claude confirmed the answer. corrected: Claude replaced a wrong answer.
+ */
+export type FactStatus = 'needs_answer' | 'needs_check' | 'verified' | 'corrected';
+
+/** Something the user wants to learn, added from a study tab. */
+export interface UserFact {
+  id: string;
+  deck: FactDeck;
+  category: string;
+  question: string;
+  answer?: string;
+  status: FactStatus;
+  /** Claude's explanation or source after checking. */
+  note?: string;
+  /** The user's answer before Claude corrected it. */
+  originalAnswer?: string;
+  addedAt: string;
+  /** Last edit; lets a sync merge each fact separately. */
+  updatedAt: string;
+}
+
+export interface UserFacts {
+  facts: UserFact[];
+  /** Ids of deleted facts, kept so a cloud merge doesn't resurrect them. */
+  deletedIds: string[];
+  lastUpdated: string;
+}
+
 // Study session state
 export interface StudySession {
   cardsReviewed: number;

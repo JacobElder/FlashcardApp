@@ -17,7 +17,9 @@ import {
   troubleCardIdsFrom,
   type StudyStats,
 } from '../lib/storage';
-import type { IRTProfile, TriviaCard } from '../types';
+import { MyFacts } from './MyFacts';
+import { EMPTY_FACTS, factsToCards } from '../lib/facts';
+import type { FactDeck, IRTProfile, TriviaCard, UserFacts } from '../types';
 
 const NO_COUNTS: Record<string, number> = {};
 const EMPTY_PROFILE: IRTProfile = { ability: 0, cardHistory: {} };
@@ -26,7 +28,11 @@ export interface DeckStudyProps {
   /** Whether this tab is visible (keyboard shortcuts only apply then). */
   isActive: boolean;
   title: string;
+  /** Which deck user-added facts are filed under. */
+  deck: FactDeck;
   cards: TriviaCard[];
+  /** Categories offered when adding a fact. */
+  categories: readonly string[];
   /** Where this deck's progress (ability and card history) is stored. */
   storageKey: string;
   /** Shown when a filter leaves no cards, e.g. "trivia cards". */
@@ -34,10 +40,14 @@ export interface DeckStudyProps {
 }
 
 /** Study screen for a question-and-answer deck with categories (Trivia, Data Science). */
-export function DeckStudy({ isActive, title, cards, storageKey, cardNoun }: DeckStudyProps) {
+export function DeckStudy({ isActive, title, deck, cards: builtInCards, categories: deckCategories, storageKey, cardNoun }: DeckStudyProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [troubleOnly, setTroubleOnly] = useState(false);
   const stats = useStorageValue<StudyStats>(STORAGE_KEYS.STUDY_STATS, EMPTY_STUDY_STATS);
+  // The user's own facts that have an answer are studied alongside the built-in cards
+  const userFacts = useStorageValue<UserFacts>(STORAGE_KEYS.USER_FACTS, EMPTY_FACTS);
+  const deckFacts = useMemo(() => userFacts.facts.filter(f => f.deck === deck), [userFacts, deck]);
+  const cards = useMemo(() => [...builtInCards, ...factsToCards(userFacts, deck)], [builtInCards, userFacts, deck]);
   const streak = currentStreak(stats);
 
   // Cards missed more than once are "trouble" cards until answered correctly a few times in a row
@@ -176,6 +186,13 @@ export function DeckStudy({ isActive, title, cards, storageKey, cardNoun }: Deck
           ⚠ Trouble{troubleCount > 0 ? ` (${troubleCount})` : ''}
         </button>
       </div>
+
+      <MyFacts
+        deck={deck}
+        facts={deckFacts}
+        categories={[...deckCategories]}
+        defaultCategory={selectedCategory !== 'All' && deckCategories.includes(selectedCategory) ? selectedCategory : deckCategories[0]}
+      />
 
       {/* Main Content */}
       <main className="px-4 py-6">

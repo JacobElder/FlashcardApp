@@ -10,6 +10,7 @@ vi.mock('./lib/supabase', async () => {
 });
 // A small, open-recall-only deck keeps the flow deterministic and fast
 vi.mock('./data/triviaCards', () => ({
+  TRIVIA_CATEGORIES: ['Geography'],
   triviaCards: ['a', 'b', 'c'].map(id => ({ id: `geo-${id}`, type: 'trivia', category: 'Geography', front: `Q ${id}`, back: `A ${id}` })),
 }));
 // The chart isn't under test, and loading recharts is what made this suite slow and flaky

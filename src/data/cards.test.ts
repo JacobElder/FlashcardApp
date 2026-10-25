@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { triviaCards } from './triviaCards';
+import { triviaCards, TRIVIA_CATEGORIES } from './triviaCards';
 import { vocabularyCards } from './vocabularyCards';
 import { dataScienceCards, DATA_SCIENCE_CATEGORIES } from './dataScienceCards';
 
-const CATEGORIES = ['Geography', 'History', 'Science', 'Pop Culture', 'Sports', 'Literature', 'Arts', 'Food & Drink', 'Music', 'Film/TV'];
+const CATEGORIES: readonly string[] = TRIVIA_CATEGORIES;
 const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 /** Category implied by each ID prefix. */
