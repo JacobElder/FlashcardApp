@@ -97,9 +97,9 @@ export const vocabularyCards: VocabularyCard[] = [
     word: 'Faciem',
     definition: 'Latin for "face" or "appearance"; often used in medical/legal contexts (ad faciem = to the face).',
     partOfSpeech: 'noun',
-    example: 'The prima facie evidence was presented to the court.',
+    example: 'The defendant insisted on stating his accusations ad faciem, to his accuser\'s face.',
     front: 'Faciem',
-    back: 'Latin for "face" or "appearance"; often used in medical/legal contexts (ad faciem = to the face).\n\n(noun)\n\nExample: "The prima facie evidence was presented to the court."',
+    back: 'Latin for "face" or "appearance"; often used in medical/legal contexts (ad faciem = to the face).\n\n(noun)\n\nExample: "The defendant insisted on stating his accusations ad faciem, to his accuser\'s face."',
   },
   {
     id: 'vocab-11',
@@ -170,16 +170,6 @@ export const vocabularyCards: VocabularyCard[] = [
     example: 'His valediction at retirement brought tears to many eyes.',
     front: 'Valediction',
     back: 'The act of saying farewell; a farewell address.\n\n(noun)\n\nExample: "His valediction at retirement brought tears to many eyes."',
-  },
-  {
-    id: 'vocab-18',
-    type: 'vocabulary',
-    word: 'Haulk',
-    definition: 'A variant spelling of "hawk" meaning to clear the throat noisily, or to peddle goods aggressively.',
-    partOfSpeech: 'verb',
-    example: 'Street vendors would haulk their wares to passersby.',
-    front: 'Haulk',
-    back: 'A variant spelling of "hawk" meaning to clear the throat noisily, or to peddle goods aggressively.\n\n(verb)\n\nExample: "Street vendors would haulk their wares to passersby."',
   },
   {
     id: 'vocab-19',
