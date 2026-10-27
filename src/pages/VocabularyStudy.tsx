@@ -44,11 +44,13 @@ export function VocabularyStudy({ isActive, autoFocusCapture }: VocabularyStudyP
   const userVocabulary = useStorageValue(STORAGE_KEYS.USER_VOCABULARY, EMPTY_VOCABULARY);
   const pending = userVocabulary.pending ?? NO_PENDING;
 
-  // Combine bundled and user vocabulary
-  const allCards = useMemo(
-    () => [...vocabularyCards, ...userVocabulary.words].map(card => ({ ...card, category: 'Vocabulary' })),
-    [userVocabulary.words]
-  );
+  // Combine bundled and user vocabulary. A user word that's also a bundled card
+  // (e.g. added by the Word Genius sync) is skipped so it isn't studied twice.
+  const allCards = useMemo(() => {
+    const bundled = new Set(vocabularyCards.map(card => card.word.trim().toLowerCase()));
+    const own = userVocabulary.words.filter(card => !bundled.has(card.word.trim().toLowerCase()));
+    return [...vocabularyCards, ...own].map(card => ({ ...card, category: 'Vocabulary' }));
+  }, [userVocabulary.words]);
 
   // Words a save would duplicate: every card and captured word except the one being edited or defined
   const existingWords = useMemo(

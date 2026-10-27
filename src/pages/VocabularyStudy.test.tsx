@@ -10,7 +10,7 @@ vi.mock('../data/vocabularyCards', () => ({ vocabularyCards: deck.cards }));
 vi.mock('../lib/dictionary', () => ({ lookupWord: vi.fn(async () => null) }));
 
 import { VocabularyStudy } from './VocabularyStudy';
-import { getUserVocabulary, markPendingNotFound, queuePendingWords } from '../lib/storage';
+import { getUserVocabulary, markPendingNotFound, queuePendingWords, setUserVocabulary } from '../lib/storage';
 
 const pendingList = () => within(screen.getByRole('region', { name: 'Words waiting for definitions' }));
 
@@ -25,6 +25,19 @@ describe('VocabularyStudy', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(pendingList().getByText('laconic')).toBeInTheDocument();
     expect(pendingList().getByText('looking up…')).toBeInTheDocument();
+  });
+
+  it('does not study a user word twice when it duplicates a bundled card', () => {
+    setUserVocabulary({
+      words: [
+        { id: 'wg-ubiquitous', type: 'vocabulary', word: 'Ubiquitous', definition: 'everywhere', front: 'Ubiquitous', back: 'everywhere' },
+        { id: 'wg-zeal', type: 'vocabulary', word: 'Zeal', definition: 'fervor', front: 'Zeal', back: 'fervor' },
+      ],
+      deletedIds: [],
+      lastUpdated: '2026-01-01',
+    });
+    render(<VocabularyStudy isActive />);
+    expect(within(screen.getByText('Total Cards').parentElement!).getByText(/^\d+$/)).toHaveTextContent('2');
   });
 
   it('does not capture a word that is already a card', () => {
