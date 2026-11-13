@@ -45,13 +45,16 @@ export function VocabularyStudy({ isActive, autoFocusCapture }: VocabularyStudyP
   const userVocabulary = useStorageValue(STORAGE_KEYS.USER_VOCABULARY, EMPTY_VOCABULARY);
   const pending = userVocabulary.pending ?? NO_PENDING;
 
-  // Combine bundled and user vocabulary. A user word that's also a bundled card
-  // (e.g. added by the Word Genius sync) is skipped so it isn't studied twice.
-  const allCards = useMemo(() => {
+  // A user word that's also a bundled card (e.g. added by the Word Genius sync)
+  // is left out of study and of My Words, so it isn't shown twice.
+  const ownWords = useMemo(() => {
     const bundled = new Set(vocabularyCards.map(card => card.word.trim().toLowerCase()));
-    const own = userVocabulary.words.filter(card => !bundled.has(card.word.trim().toLowerCase()));
-    return [...vocabularyCards, ...own].map(card => ({ ...card, category: 'Vocabulary' }));
+    return userVocabulary.words.filter(card => !bundled.has(card.word.trim().toLowerCase()));
   }, [userVocabulary.words]);
+  const allCards = useMemo(
+    () => [...vocabularyCards, ...ownWords].map(card => ({ ...card, category: 'Vocabulary' })),
+    [ownWords]
+  );
 
   // Words a save would duplicate: every card and captured word except the one being edited or defined
   const existingWords = useMemo(
@@ -184,13 +187,13 @@ export function VocabularyStudy({ isActive, autoFocusCapture }: VocabularyStudyP
           aria-expanded={showMyWords}
           className="text-xs px-3 py-1 rounded-full font-medium self-center bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
         >
-          My Words ({userVocabulary.words.length})
+          My Words ({ownWords.length})
         </button>
       </div>
 
       {showMyWords && (
         <MyWordsList
-          words={userVocabulary.words}
+          words={ownWords}
           onEdit={(word) => {
             setEditingWord(word);
             setIsModalOpen(true);

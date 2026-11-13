@@ -38,6 +38,11 @@ describe('VocabularyStudy', () => {
     });
     render(<VocabularyStudy isActive />);
     expect(within(screen.getByText('Total Cards').parentElement!).getByText(/^\d+$/)).toHaveTextContent('2');
+    // ...and My Words lists only the word that isn't already a card
+    fireEvent.click(screen.getByRole('button', { name: 'My Words (1)' }));
+    const list = screen.getByRole('list', { name: 'My words' });
+    expect(within(list).getByRole('button', { name: 'Edit Zeal' })).toBeInTheDocument();
+    expect(within(list).queryByRole('button', { name: 'Edit Ubiquitous' })).not.toBeInTheDocument();
   });
 
   it('does not capture a word that is already a card', () => {

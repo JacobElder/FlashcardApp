@@ -4,7 +4,7 @@
 - [x] **Merge before pushing in cloud sync**: every sync now downloads and merges first, and only writes if the cloud row is unchanged since (compare-and-swap on `updated_at`), so an open app can't overwrite `/define-pending` results or another device.
 - [x] **Trouble cards graduate**: a card leaves the Trouble drill after 3 correct answers in a row (`correctStreak` in its history, which syncs newest-wins; the miss count itself only grows, since sync keeps the larger count).
 - [ ] **Claude-written definitions (deferred)**: Supabase Edge Function that calls the Claude API when the free dictionary has no entry (or always), with an optional "where I saw it" field to pick the right sense. Needs an Anthropic API key as a Supabase secret.
-- [ ] **Set up the Word Genius daily sync** (one-time, ~5 minutes; full guide in `scripts/word-genius/README.md`):
+- [x] **Set up the Word Genius daily sync** (done 2026-11-12) (one-time, ~5 minutes; full guide in `scripts/word-genius/README.md`):
   1. At <https://script.google.com> (signed in to the Gmail account that gets Word Genius), create a project named "Word Genius sync".
   2. Replace the placeholder code with all of `scripts/word-genius/WordGenius.gs` and save.
   3. In Project Settings → Script Properties, add `SUPABASE_URL`, `SUPABASE_ANON_KEY` (from `.env.local`), `FLASHCARD_EMAIL`, and `FLASHCARD_PASSWORD`.
