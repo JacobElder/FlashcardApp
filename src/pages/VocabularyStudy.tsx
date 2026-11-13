@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { FlashCard } from '../components/FlashCard';
+import { SkipButton } from '../components/SkipButton';
 import { RatingButtons } from '../components/RatingButtons';
 import { ProgressBar } from '../components/ProgressBar';
 import { EmptyState } from '../components/EmptyState';
@@ -233,16 +234,7 @@ export function VocabularyStudy({ isActive, autoFocusCapture }: VocabularyStudyP
               onFlip={flipCard}
             />
 
-            <div className="flex justify-center">
-              <button
-                type="button"
-                onClick={skipCard}
-                className="text-slate-400 hover:text-slate-200 text-sm transition-colors"
-                aria-keyshortcuts="S"
-              >
-                Skip
-              </button>
-            </div>
+            <SkipButton onSkip={skipCard} />
 
             {isFlipped && (
               <div className="animate-fade-in">
