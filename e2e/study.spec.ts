@@ -81,3 +81,26 @@ test('signs in, studies a card, syncs it to the cloud, and signs out', async ({ 
   await expect(page.getByRole('heading', { name: 'Adaptive Learning' })).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test('long card text stays inside the card on a phone-width screen', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await fakeSupabase(page);
+  await page.goto('./');
+  await page.getByLabel('Email').fill(USER.email);
+  await page.getByLabel('Password').fill('correct-horse');
+  await page.getByRole('button', { name: 'Sign In', exact: true }).click();
+  await page.getByRole('button', { name: 'Vocabulary' }).click();
+
+  const showAnswer = page.getByRole('button', { name: 'Show answer' });
+  for (let i = 0; i < 8; i++) {
+    await showAnswer.click();
+    const face = page.locator('[aria-hidden="false"]').filter({ hasText: 'Rate your recall below' }).locator('> div');
+    const text = face.locator('p').first();
+    await expect(text).toBeVisible();
+    const [faceBox, textBox] = [await face.boundingBox(), await text.boundingBox()];
+    await page.waitForTimeout(600); // let the flip animation finish
+    if (i === 0) await page.screenshot({ path: test.info().outputPath('vocab-back.png') });
+    expect(textBox!.y + textBox!.height).toBeLessThanOrEqual(faceBox!.y + faceBox!.height);
+    await page.getByRole('button', { name: 'Skip' }).click();
+  }
+});

@@ -15,6 +15,13 @@ const DIFFICULTY_STYLES = {
   Easy:   'bg-emerald-500/30 text-emerald-300',
 } as const;
 
+/** Smaller type for long text so it fits a phone-width card. */
+function textSize(text: string) {
+  if (text.length > 160) return 'text-base md:text-xl';
+  if (text.length > 80) return 'text-lg md:text-2xl';
+  return 'text-xl md:text-2xl';
+}
+
 /** How long the MC result stays on screen before moving on. */
 const MC_FEEDBACK_MS = 1000;
 
@@ -81,13 +88,14 @@ export function FlashCard({ card, isFlipped, onFlip, format = 'open', onMultiple
       onClick={isOpen ? onFlip : undefined}
     >
       <div
-        className={`relative w-full min-h-64 transition-transform duration-500 transform-style-3d ${
+        className={`grid w-full min-h-64 transition-transform duration-500 transform-style-3d ${
           isFlipped ? 'rotate-y-180' : ''
         }`}
       >
         {/* Front of card */}
-        <div className="absolute inset-0 backface-hidden" aria-hidden={isFlipped}>
-          <div className="h-full bg-gradient-to-br from-blue-600 to-blue-800 rounded-2xl p-6 shadow-xl flex flex-col">
+        {/* Both faces share one grid cell, so the card is as tall as its longer side */}
+        <div className="[grid-area:1/1] flex flex-col backface-hidden" aria-hidden={isFlipped}>
+          <div className="flex-1 bg-gradient-to-br from-blue-600 to-blue-800 rounded-2xl p-5 sm:p-6 shadow-xl flex flex-col">
             <div className="flex justify-between items-center mb-2">
               {card.category && (
                 <span className="text-blue-200 text-sm font-medium uppercase tracking-wide">
@@ -101,7 +109,7 @@ export function FlashCard({ card, isFlipped, onFlip, format = 'open', onMultiple
               )}
             </div>
             <div className="flex-1 flex flex-col items-center justify-center w-full">
-              <p className="text-white text-xl md:text-2xl text-center font-medium leading-relaxed mb-4">
+              <p className={`text-white ${textSize(card.front)} text-center font-medium leading-relaxed mb-4 break-words`}>
                 {card.front}
               </p>
               {format === 'mc' && mcOptions.length > 0 && (
@@ -163,8 +171,8 @@ export function FlashCard({ card, isFlipped, onFlip, format = 'open', onMultiple
         </div>
 
         {/* Back of card */}
-        <div className="absolute inset-0 backface-hidden rotate-y-180" aria-hidden={!isFlipped}>
-          <div className="h-full bg-gradient-to-br from-emerald-600 to-emerald-800 rounded-2xl p-6 shadow-xl flex flex-col">
+        <div className="[grid-area:1/1] flex flex-col backface-hidden rotate-y-180" aria-hidden={!isFlipped}>
+          <div className="flex-1 bg-gradient-to-br from-emerald-600 to-emerald-800 rounded-2xl p-5 sm:p-6 shadow-xl flex flex-col">
             <div className="flex justify-between items-center mb-2">
               {card.category && (
                 <span className="text-emerald-200 text-sm font-medium uppercase tracking-wide">
@@ -178,7 +186,7 @@ export function FlashCard({ card, isFlipped, onFlip, format = 'open', onMultiple
               )}
             </div>
             <div className="flex-1 flex items-center justify-center">
-              <p className="text-white text-xl md:text-2xl text-center font-medium leading-relaxed whitespace-pre-line">
+              <p className={`text-white ${textSize(card.back)} text-center font-medium leading-relaxed whitespace-pre-line break-words`}>
                 {card.back}
               </p>
             </div>
