@@ -142,7 +142,7 @@ describe('TriviaStudy', () => {
 
   it('explains a session where every remaining card was skipped', () => {
     render(<TriviaStudy isActive />);
-    for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
+    for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole('button', { name: /skip/i }));
     expect(screen.getByText('Nothing Left This Session')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Start Over' }));
     expect(screen.getByText(/^Question /)).toBeInTheDocument();

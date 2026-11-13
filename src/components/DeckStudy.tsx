@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
 import { FlashCard } from './FlashCard';
+import { SkipButton } from './SkipButton';
 import { RatingButtons } from './RatingButtons';
 import { ProgressBar } from './ProgressBar';
 import { EmptyState } from './EmptyState';
@@ -241,16 +242,7 @@ export function DeckStudy({ isActive, title, deck, cards: builtInCards, categori
               <ConfidenceButtons onPredict={recordPrediction} />
             )}
 
-            <div className="flex justify-center">
-              <button
-                type="button"
-                onClick={skipCard}
-                className="text-slate-400 hover:text-slate-200 text-sm transition-colors"
-                aria-keyshortcuts="S"
-              >
-                Skip
-              </button>
-            </div>
+            <SkipButton onSkip={skipCard} />
 
             {currentFormat !== 'mc' && isFlipped && (
               <div className="animate-fade-in">
