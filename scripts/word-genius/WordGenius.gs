@@ -29,6 +29,7 @@ function wordFromSubject(subject) {
 /** HTML email body → plain text with single spaces (tags, styles and entities removed). */
 function htmlToText(html) {
   return String(html || '')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<(style|script|head)[\s\S]*?<\/\1>/gi, ' ')
     .replace(/<br\s*\/?>|<\/(p|div|td|tr|h\d|li)>/gi, '\n')
     .replace(/<[^>]+>/g, ' ')
@@ -63,7 +64,7 @@ function parseWordGeniusEmail(subject, bodyText) {
   var escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   var def = new RegExp('Definition\\s*:?\\s*(?:' + escaped + ')?\\s*(.+?)(?=\\s*(?:Let.s Play|Test your vocab|Our Favorite Words|Learn:|Email Preferences|$))', 'i').exec(text);
   if (def) {
-    var definition = def[1].trim();
+    var definition = def[1].replace(/\s*(?:-->|<!--)\s*/g, ' ').trim();
     // Guard against grabbing a whole newsletter if the layout changes
     if (definition.length >= 3 && definition.length <= 400) result.definition = definition;
   }

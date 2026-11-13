@@ -15,7 +15,7 @@ const EMAIL_HTML = `<html><head><style>.x{color:red}</style></head><body>
   <table><tr><td>Part of Speech</td><td>adjective</td></tr><tr><td>American English, late 19th century</td></tr></table>
   <p>Find out how <a href="https://x.example">to use &quot;Tony&quot; in a sentence</a>....</p>
   <div><b>Definition:</b> Tony</div>
-  <div>(North American) Fashionable among wealthy or stylish people.</div>
+  <div>(North American) Fashionable among wealthy or stylish people.<!--[if mso]><table><tr><td><![endif]--></div>
   <h2>Let&rsquo;s Play</h2><p>Test your vocab!</p>
   <p>What term describes a holiday from work?</p>
 </body></html>`;
@@ -29,7 +29,7 @@ describe('Word Genius parsing', () => {
 
   it('turns the HTML body into plain text without tags, styles, entities or links', () => {
     const text = htmlToText(EMAIL_HTML);
-    expect(text).not.toMatch(/<|color:red|https?:|&quot;/);
+    expect(text).not.toMatch(/<|-->|color:red|https?:|&quot;/);
     expect(text).toContain('to use "Tony" in a sentence');
   });
 
