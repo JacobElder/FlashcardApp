@@ -1,14 +1,5 @@
 import { useState, useMemo } from 'react';
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  ReferenceLine
-} from 'recharts';
+import { SkillChart } from '../components/SkillChart';
 import { STORAGE_KEYS } from '../lib/storage';
 import { useStorageValue } from '../hooks/useStorageValue';
 import type { IRTProfile } from '../types';
@@ -72,29 +63,7 @@ export function Analytics() {
           </p>
           
           {chartData.length > 0 ? (
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: -20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis dataKey="step" stroke="#94a3b8" tick={{fontSize: 12}} />
-                  <YAxis domain={[-4, 4]} stroke="#94a3b8" tick={{fontSize: 12}} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f8fafc' }}
-                    labelStyle={{ color: '#94a3b8' }}
-                  />
-                  <ReferenceLine y={0} stroke="#475569" />
-                  <Line 
-                    type="monotone" 
-                    dataKey="ability"
-                    name="Skill level"
-                    stroke="#3b82f6" 
-                    strokeWidth={3}
-                    dot={false}
-                    activeDot={{ r: 6 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
+            <SkillChart data={chartData} />
           ) : (
             <div className="h-64 flex items-center justify-center border-2 border-dashed border-slate-700 rounded-lg">
               <p className="text-slate-400 text-center px-4">Not enough data to plot trajectory.<br/>Complete a few study sessions first!</p>
