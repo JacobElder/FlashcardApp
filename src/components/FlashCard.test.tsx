@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { FlashCard } from './FlashCard';
-import { useMultipleChoice } from '../hooks/useMultipleChoice';
+import { mcAnswerText, useMultipleChoice } from '../hooks/useMultipleChoice';
 import type { FlashCard as FlashCardType } from '../types';
 
 function McCard({ card, onAnswer = () => {}, onFlip = () => {} }: {
@@ -163,5 +163,19 @@ describe('FlashCard interactions', () => {
     rerender(<FlashCard card={{ ...card, id: 'q2', hint: 'Ringed' }} isFlipped={false} onFlip={onFlip} />);
     expect(screen.queryByText(/Ringed/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Show Hint' })).toBeInTheDocument();
+  });
+});
+
+describe('mcAnswerText', () => {
+  it('drops a trailing note so the answer does not stand out among bare options', () => {
+    expect(mcAnswerText({ back: 'Lead (from Latin plumbum)', options: ['Platinum', 'Tin', 'Zinc'] })).toBe('Lead');
+  });
+  it('keeps the note when the distractors carry notes too', () => {
+    const card = { back: 'Crème de cassis (blackcurrant)', options: ['Chambord (raspberry)', 'Cointreau (orange)', 'Amaretto (almond)'] };
+    expect(mcAnswerText(card)).toBe(card.back);
+  });
+  it('keeps answers that are only a parenthetical or have no note', () => {
+    expect(mcAnswerText({ back: '(none)', options: ['a'] })).toBe('(none)');
+    expect(mcAnswerText({ back: 'Paris', options: ['Rome'] })).toBe('Paris');
   });
 });

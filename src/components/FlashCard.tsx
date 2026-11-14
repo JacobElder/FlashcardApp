@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import type { FlashCard as FlashCardType, CardFormat } from '../types';
-import type { MultipleChoice } from '../hooks/useMultipleChoice';
+import { mcAnswerText, type MultipleChoice } from '../hooks/useMultipleChoice';
 
 interface FlashCardProps {
   card: FlashCardType;
@@ -58,7 +58,8 @@ export function FlashCard({ card, isFlipped, onFlip, format = 'open', multipleCh
     multipleChoice?.select(option);
   };
 
-  const mcCorrect = selectedMcOption !== null && selectedMcOption === card.back;
+  const mcAnswer = mcAnswerText(card);
+  const mcCorrect = selectedMcOption !== null && selectedMcOption === mcAnswer;
 
   const isOpen = format !== 'mc';
 
@@ -108,7 +109,7 @@ export function FlashCard({ card, isFlipped, onFlip, format = 'open', multipleCh
                     let btnClass = 'bg-blue-700/80 hover:bg-blue-600 text-white border border-blue-500/50';
                     let mark: string | null = null;
                     if (selectedMcOption !== null) {
-                      if (opt === card.back) {
+                      if (opt === mcAnswer) {
                         btnClass = 'bg-emerald-600 text-white border-2 border-emerald-400';
                         mark = '✓';
                       } else if (opt === selectedMcOption) {
@@ -141,6 +142,9 @@ export function FlashCard({ card, isFlipped, onFlip, format = 'open', multipleCh
                   <p className="sr-only" aria-live="polite" role="status">
                     {selectedMcOption === null ? '' : mcCorrect ? 'Correct' : `Incorrect — answer: ${card.back}`}
                   </p>
+                  {selectedMcOption !== null && mcAnswer !== card.back && (
+                    <p className="text-sm text-blue-100 animate-fade-in">{card.back}</p>
+                  )}
                   {selectedMcOption !== null && (
                     <div className="mt-2 flex items-center justify-between gap-3 animate-fade-in">
                       <p className={`font-semibold ${mcCorrect ? 'text-emerald-300' : 'text-red-200'}`} aria-hidden="true">
