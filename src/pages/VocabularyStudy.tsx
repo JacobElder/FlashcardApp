@@ -1,20 +1,23 @@
 import { useState, useMemo } from 'react';
 import { FlashCard } from '../components/FlashCard';
 import { SkipButton } from '../components/SkipButton';
-import { RatingButtons } from '../components/RatingButtons';
-import { ProgressBar } from '../components/ProgressBar';
+import { StickyRatingBar } from '../components/StickyRatingBar';
 import { EmptyState } from '../components/EmptyState';
+import { StudyHeader } from '../components/StudyHeader';
+import { StudyStats, SessionTally } from '../components/StudyStats';
+import { SessionEndState } from '../components/SessionEndState';
 import { AddWordModal } from '../components/AddWordModal';
 import { MyWordsList } from '../components/MyWordsList';
 import { QuickCapture } from '../components/QuickCapture';
 import { PendingWordsList } from '../components/PendingWordsList';
-import { SessionSummary } from '../components/SessionSummary';
 import { useAdaptiveTesting } from '../hooks/useAdaptiveTesting';
 import { useStorageValue } from '../hooks/useStorageValue';
 import { useStudyShortcuts } from '../hooks/useStudyShortcuts';
 import { vocabularyCards } from '../data/vocabularyCards';
 import {
   STORAGE_KEYS,
+  EMPTY_STUDY_STATS,
+  currentStreak,
   addUserWord,
   deleteUserWord,
   EMPTY_VOCABULARY,
@@ -24,6 +27,7 @@ import {
   resolvePendingWord,
   toCardFields,
   updateUserWord,
+  type StudyStats as StudyStatsData,
 } from '../lib/storage';
 import type { VocabularyCard, NewWordFormData, PendingWord } from '../types';
 
@@ -44,6 +48,7 @@ export function VocabularyStudy({ isActive, autoFocusCapture }: VocabularyStudyP
   const [showMyWords, setShowMyWords] = useState(false);
   const userVocabulary = useStorageValue(STORAGE_KEYS.USER_VOCABULARY, EMPTY_VOCABULARY);
   const pending = userVocabulary.pending ?? NO_PENDING;
+  const streak = currentStreak(useStorageValue<StudyStatsData>(STORAGE_KEYS.STUDY_STATS, EMPTY_STUDY_STATS));
 
   // A user word that's also a bundled card (e.g. added by the Word Genius sync)
   // is left out of study and of My Words, so it isn't shown twice.
@@ -111,151 +116,96 @@ export function VocabularyStudy({ isActive, autoFocusCapture }: VocabularyStudyP
 
   return (
     <div className="min-h-screen bg-slate-900 pb-20">
-      {/* Header */}
-      <header className="bg-slate-800 border-b border-slate-700 px-4 py-4">
-        <div className="flex justify-between items-center">
-          <h1 className="text-xl font-bold text-white">Vocabulary Study</h1>
+      <StudyHeader
+        title="Vocabulary Study"
+        streak={streak}
+        masteryLevel={masteryLevel}
+        actions={
           <button
             type="button"
             onClick={openAddModal}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
+            className="min-h-11 bg-blue-600 hover:bg-blue-700 text-white px-4 rounded-lg text-sm font-medium transition-colors flex items-center gap-1"
           >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 4v16m8-8H4"
-              />
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
             Add Word
           </button>
-        </div>
-        <div className="mt-3">
-          <ProgressBar
-            value={masteryLevel}
-            label="Overall Mastery"
-            showPercentage
-            color="gradient"
-          />
-        </div>
-      </header>
-
-      <QuickCapture
-        onCapture={(words) => queuePendingWords(words, allCards.map(card => card.word))}
-        autoFocus={autoFocusCapture}
-      />
-      <PendingWordsList
-        pending={pending}
-        onDefine={(item) => {
-          setEditingWord(null);
-          setDefiningWord(item);
-          setIsModalOpen(true);
-        }}
-        onRemove={(item) => removePendingWord(item.id)}
-      />
-
-      {/* Stats */}
-      <div className="flex justify-center gap-6 py-4 px-4 border-b border-slate-800 flex-wrap">
-        <div className="text-center">
-          <p className="text-2xl font-bold text-purple-400">{userAbility.toFixed(2)}</p>
-          <p className="text-xs text-slate-400">Ability (θ)</p>
-        </div>
-        <div className="text-center">
-          <p className="text-2xl font-bold text-slate-300">{totalCards}</p>
-          <p className="text-xs text-slate-400">Total Cards</p>
-        </div>
-        <div className="text-center">
-          <p className="text-2xl font-bold text-sky-400">{dueCount}</p>
-          <p className="text-xs text-slate-400">Due / New</p>
-        </div>
-        <div className="text-center">
-          <p className="text-2xl font-bold text-amber-400">
-            {session.cardsReviewed}
-          </p>
-          <p className="text-xs text-slate-400">Reviewed</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => setShowMyWords(prev => !prev)}
-          aria-expanded={showMyWords}
-          className="text-xs px-3 py-1 rounded-full font-medium self-center bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
-        >
-          My Words ({ownWords.length})
-        </button>
-      </div>
-
-      {showMyWords && (
-        <MyWordsList
-          words={ownWords}
-          onEdit={(word) => {
-            setEditingWord(word);
+        }
+        details={
+          <>
+            <StudyStats ability={userAbility} totalCards={totalCards} dueCount={dueCount} reviewed={session.cardsReviewed}>
+              <button
+                type="button"
+                onClick={() => setShowMyWords(prev => !prev)}
+                aria-expanded={showMyWords}
+                className="min-h-11 text-sm px-4 rounded-full font-medium bg-slate-700 text-slate-200 hover:bg-slate-600 transition-colors"
+              >
+                My Words ({ownWords.length})
+              </button>
+            </StudyStats>
+            {showMyWords && (
+              <MyWordsList
+                words={ownWords}
+                onEdit={(word) => {
+                  setEditingWord(word);
+                  setIsModalOpen(true);
+                }}
+                onDelete={(word) => deleteUserWord(word.id)}
+              />
+            )}
+          </>
+        }
+      >
+        <QuickCapture
+          onCapture={(words) => queuePendingWords(words, allCards.map(card => card.word))}
+          autoFocus={autoFocusCapture}
+        />
+        <PendingWordsList
+          pending={pending}
+          onDefine={(item) => {
+            setEditingWord(null);
+            setDefiningWord(item);
             setIsModalOpen(true);
           }}
-          onDelete={(word) => deleteUserWord(word.id)}
+          onRemove={(item) => removePendingWord(item.id)}
         />
-      )}
+        <div className="pb-3 border-b border-slate-800" />
+      </StudyHeader>
 
       {/* Main Content */}
-      <main className="px-4 py-6">
+      <main className="px-4 py-4 sm:py-6">
         {!hasMoreCards ? (
-          session.cardsReviewed > 0 ? (
-            <SessionSummary session={session} onReset={resetSession} />
-          ) : skippedCount > 0 ? (
-            <EmptyState
-              title="Nothing Left This Session"
-              description="You skipped the remaining cards. Start over to see them again."
-              icon="cards"
-              action={{ label: 'Start Over', onClick: resetSession }}
-            />
-          ) : isCaughtUp && totalCards > 0 ? (
-            <EmptyState
-              title="All Caught Up!"
-              description="No vocabulary is due for review. Add new words, come back later, or study ahead."
-              icon="check"
-              action={{ label: 'Study Ahead', onClick: studyAhead }}
-            />
-          ) : (
-            <EmptyState
-              title="No Cards Yet"
-              description="Add your first vocabulary word to start studying!"
-              icon="add"
-              action={{ label: 'Add Word', onClick: openAddModal }}
-            />
-          )
+          <SessionEndState
+            session={session}
+            skippedCount={skippedCount}
+            isCaughtUp={isCaughtUp}
+            totalCards={totalCards}
+            onReset={resetSession}
+            onStudyAhead={studyAhead}
+            caughtUpDescription="No vocabulary is due for review. Add new words, come back later, or study ahead."
+            empty={
+              <EmptyState
+                title="No Cards Yet"
+                description="Add your first vocabulary word to start studying!"
+                icon="add"
+                action={{ label: 'Add Word', onClick: openAddModal }}
+              />
+            }
+          />
         ) : currentCard ? (
-          <div className="space-y-6">
+          <div className="space-y-4 sm:space-y-6">
             <FlashCard
               card={currentCard}
               isFlipped={isFlipped}
               onFlip={flipCard}
             />
 
+            {isFlipped && <StickyRatingBar onRate={rateCard} />}
+
             <SkipButton onSkip={skipCard} />
 
-            {isFlipped && (
-              <div className="animate-fade-in">
-                <RatingButtons onRate={rateCard} />
-              </div>
-            )}
-
-            {/* Session stats */}
-            {session.cardsReviewed > 0 && (
-              <div className="flex justify-center gap-4 text-sm">
-                <span className="text-emerald-400">
-                  Correct: {session.correctCount}
-                </span>
-                <span className="text-red-400">
-                  Incorrect: {session.incorrectCount}
-                </span>
-              </div>
-            )}
+            <SessionTally session={session} />
           </div>
         ) : null}
       </main>

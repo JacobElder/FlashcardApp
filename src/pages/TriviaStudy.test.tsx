@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within, act } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import type { IRTProfile } from '../types';
 
 const deck = vi.hoisted(() => {
@@ -159,21 +159,49 @@ describe('TriviaStudy', () => {
     expect(reviewed()).toBe('1');
   });
 
-  it('rates a multiple-choice answer after its feedback delay: right is Good, wrong is Again', () => {
+  it('rates a multiple-choice answer when the user moves on: right is Good, wrong is Again', () => {
     // Open recall is far too hard at ability 0, so the scheduler offers MC
     const mc = deck.card('art-1', 'Arts', { options: ['x', 'y', 'z'], difficulty: 4, mcDifficulty: 0 });
     deck.cards.push(mc);
     try {
-      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       render(<TriviaStudy isActive />);
       fireEvent.click(screen.getByRole('button', { name: 'Arts' }));
       expect(screen.queryByRole('button', { name: 'Show answer' })).not.toBeInTheDocument();
 
       fireEvent.click(screen.getByRole('button', { name: 'x' })); // wrong
-      expect(reviewed()).toBe('0'); // feedback first
-      act(() => { vi.advanceTimersByTime(1000); });
+      expect(reviewed()).toBe('0'); // feedback first, until Next
+      expect(screen.getByRole('status')).toHaveTextContent('Incorrect — answer: Answer art-1');
+      // Skipping is off while the result is showing
+      expect(screen.getByRole('button', { name: /skip/i })).toBeDisabled();
+      fireEvent.keyDown(document.body, { key: 's' });
+      expect(reviewed()).toBe('0');
+
+      fireEvent.click(screen.getByRole('button', { name: /Next/ }));
       expect(reviewed()).toBe('1');
       expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.INCORRECT_COUNTS)!)).toEqual({ 'art-1': 1 });
+    } finally {
+      deck.cards.pop();
+    }
+  });
+
+  it('picks MC options with 1-4 in displayed order and moves on with Enter', () => {
+    const mc = deck.card('art-1', 'Arts', { options: ['x', 'y', 'z'], difficulty: 4, mcDifficulty: 0 });
+    deck.cards.push(mc);
+    try {
+      render(<TriviaStudy isActive />);
+      fireEvent.click(screen.getByRole('button', { name: 'Arts' }));
+      const displayed = screen.getAllByRole('button', { name: /^(x|y|z|Answer art-1)$/ })
+        .map(b => b.textContent!.replace(/^\d/, ''));
+      expect(displayed).toHaveLength(4);
+      fireEvent.keyDown(document.body, { key: '3' });
+      expect(screen.getByRole('button', { name: displayed[2] })).toBeDisabled();
+      const right = displayed[2] === 'Answer art-1';
+      expect(screen.getByRole('status')).toHaveTextContent(right ? /^Correct$/ : /^Incorrect/);
+      // A second number doesn't change the pick
+      fireEvent.keyDown(document.body, { key: '1' });
+      fireEvent.keyDown(document.body, { key: 'Enter' });
+      expect(reviewed()).toBe('1');
+      expect(localStorage.getItem(STORAGE_KEYS.INCORRECT_COUNTS)).toBe(right ? null : JSON.stringify({ 'art-1': 1 }));
     } finally {
       deck.cards.pop();
     }

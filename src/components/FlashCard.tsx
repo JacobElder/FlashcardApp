@@ -1,11 +1,14 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { FlashCard as FlashCardType, CardFormat } from '../types';
+import type { MultipleChoice } from '../hooks/useMultipleChoice';
+
 interface FlashCardProps {
   card: FlashCardType;
   isFlipped: boolean;
   onFlip: () => void;
   format?: CardFormat;
-  onMultipleChoiceSelect?: (isCorrect: boolean) => void;
+  /** Options and pick for a multiple-choice card (from useMultipleChoice). */
+  multipleChoice?: MultipleChoice;
 }
 
 const DIFFICULTY_STYLES = {
@@ -22,15 +25,13 @@ function textSize(text: string) {
   return 'text-xl md:text-2xl';
 }
 
-/** How long the MC result stays on screen before moving on. */
-const MC_FEEDBACK_MS = 1000;
-
-export function FlashCard({ card, isFlipped, onFlip, format = 'open', onMultipleChoiceSelect }: FlashCardProps) {
+export function FlashCard({ card, isFlipped, onFlip, format = 'open', multipleChoice }: FlashCardProps) {
   const [hintVisible, setHintVisible] = useState(false);
-  const [selectedMcOption, setSelectedMcOption] = useState<string | null>(null);
-  const mcTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const showAnswerButton = useRef<HTMLButtonElement>(null);
   const showQuestionButton = useRef<HTMLButtonElement>(null);
+  const nextButton = useRef<HTMLButtonElement>(null);
+  const mcOptions = format === 'mc' ? multipleChoice?.options ?? [] : [];
+  const selectedMcOption = format === 'mc' ? multipleChoice?.selected ?? null : null;
 
   // Move focus from the flip control on the face being hidden to the one on the
   // face being shown. Otherwise the next Space/Enter "clicks" the hidden button
@@ -42,33 +43,22 @@ export function FlashCard({ card, isFlipped, onFlip, format = 'open', onMultiple
     if (hidden && document.activeElement === hidden) shown?.focus();
   }, [isFlipped]);
 
-  // Reset hint and cancel a pending MC answer when the card changes or unmounts
+  // Reset the hint when the card changes
   useEffect(() => {
     setHintVisible(false);
-    setSelectedMcOption(null);
-    return () => clearTimeout(mcTimer.current);
   }, [card.id, format]);
 
-  const mcOptions = useMemo(() => {
-    if (format !== 'mc' || !card.options) return [];
-    const all = [...card.options, card.back];
-    // Fisher-Yates shuffle
-    for (let i = all.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [all[i], all[j]] = [all[j], all[i]];
-    }
-    return all;
-  }, [format, card.options, card.back]);
+  // Once an option is picked the options are disabled, so focus Next for Enter/Space
+  useEffect(() => {
+    if (selectedMcOption !== null) nextButton.current?.focus({ preventScroll: true });
+  }, [selectedMcOption]);
 
   const handleOptionClick = (e: React.MouseEvent, option: string) => {
     e.stopPropagation();
-    if (selectedMcOption) return; // Prevent multiple clicks
-    setSelectedMcOption(option);
-
-    mcTimer.current = setTimeout(() => {
-      onMultipleChoiceSelect?.(option === card.back);
-    }, MC_FEEDBACK_MS);
+    multipleChoice?.select(option);
   };
+
+  const mcCorrect = selectedMcOption !== null && selectedMcOption === card.back;
 
   const isOpen = format !== 'mc';
 
@@ -114,29 +104,59 @@ export function FlashCard({ card, isFlipped, onFlip, format = 'open', onMultiple
               </p>
               {format === 'mc' && mcOptions.length > 0 && (
                 <div className="w-full flex flex-col gap-2 mt-4">
-                  {mcOptions.map((opt) => {
+                  {mcOptions.map((opt, index) => {
                     let btnClass = 'bg-blue-700/80 hover:bg-blue-600 text-white border border-blue-500/50';
-                    if (selectedMcOption) {
+                    let mark: string | null = null;
+                    if (selectedMcOption !== null) {
                       if (opt === card.back) {
                         btnClass = 'bg-emerald-600 text-white border-2 border-emerald-400';
+                        mark = '✓';
                       } else if (opt === selectedMcOption) {
                         btnClass = 'bg-red-600 text-white border-2 border-red-400';
+                        mark = '✗';
                       } else {
-                        btnClass = 'bg-blue-800/50 text-blue-300 opacity-50 border-blue-800/50';
+                        btnClass = 'bg-blue-800/50 text-blue-200 opacity-60 border border-blue-800/50';
                       }
                     }
                     return (
                       <button
-                        key={opt}
+                        key={`${index}-${opt}`}
                         type="button"
                         onClick={(e) => handleOptionClick(e, opt)}
-                        className={`px-4 py-3 rounded-lg text-left transition-all font-medium text-sm md:text-base ${btnClass}`}
-                        disabled={!!selectedMcOption}
+                        className={`min-h-11 px-4 py-3 rounded-lg text-left transition-all font-medium text-sm md:text-base flex items-center gap-3 ${btnClass}`}
+                        disabled={selectedMcOption !== null}
+                        aria-keyshortcuts={index < 9 ? String(index + 1) : undefined}
                       >
-                        {opt}
+                        <kbd
+                          className="hidden sm:inline-flex shrink-0 w-5 h-5 items-center justify-center rounded bg-black/20 text-[11px] font-normal"
+                          aria-hidden="true"
+                        >
+                          {index + 1}
+                        </kbd>
+                        <span className="flex-1">{opt}</span>
+                        {mark && <span className="shrink-0 text-lg font-bold" aria-hidden="true">{mark}</span>}
                       </button>
                     );
                   })}
+                  <p className="sr-only" aria-live="polite" role="status">
+                    {selectedMcOption === null ? '' : mcCorrect ? 'Correct' : `Incorrect — answer: ${card.back}`}
+                  </p>
+                  {selectedMcOption !== null && (
+                    <div className="mt-2 flex items-center justify-between gap-3 animate-fade-in">
+                      <p className={`font-semibold ${mcCorrect ? 'text-emerald-300' : 'text-red-200'}`} aria-hidden="true">
+                        {mcCorrect ? '✓ Correct' : '✗ Incorrect'}
+                      </p>
+                      <button
+                        ref={nextButton}
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); multipleChoice?.next(); }}
+                        className="min-h-11 px-5 rounded-lg bg-white text-blue-800 font-semibold hover:bg-blue-50"
+                        aria-keyshortcuts="Enter"
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -145,7 +165,7 @@ export function FlashCard({ card, isFlipped, onFlip, format = 'open', onMultiple
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setHintVisible(true); }}
-                className="text-blue-200 text-sm underline mt-3 self-center hover:text-white transition-colors"
+                className="min-h-11 px-3 text-blue-200 text-sm underline mt-2 self-center hover:text-white transition-colors"
                 tabIndex={isFlipped ? -1 : 0}
               >
                 Show Hint
@@ -161,7 +181,7 @@ export function FlashCard({ card, isFlipped, onFlip, format = 'open', onMultiple
                 ref={showAnswerButton}
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onFlip(); }}
-                className="text-blue-100 text-sm text-center mt-4 self-center underline-offset-4 hover:underline"
+                className="min-h-11 px-4 text-blue-100 text-sm text-center mt-2 self-center underline-offset-4 hover:underline"
                 tabIndex={isFlipped ? -1 : 0}
               >
                 Show answer
@@ -198,7 +218,7 @@ export function FlashCard({ card, isFlipped, onFlip, format = 'open', onMultiple
                 ref={showQuestionButton}
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onFlip(); }}
-                className="text-emerald-100 text-xs text-center mt-2 self-center underline-offset-4 hover:underline"
+                className="min-h-11 px-4 text-emerald-100 text-sm text-center mt-1 self-center underline-offset-4 hover:underline"
                 tabIndex={isFlipped ? 0 : -1}
               >
                 Show question
