@@ -53,11 +53,18 @@ describe('App', () => {
     fireEvent.click(within(triviaPage).getByRole('button', { name: /^Good:/ }));
     expect(reviewed()).toBe('1');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Analytics' }));
-    expect(await screen.findByRole('heading', { name: 'Quant Analytics' })).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Vocabulary' }));
-    expect(await screen.findByRole('heading', { name: 'Vocabulary Study' })).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Trivia' }));
+    const tabs = within(screen.getByRole('navigation', { name: 'Study sections' }));
+    fireEvent.click(tabs.getByRole('button', { name: 'Analytics' }));
+    const analyticsHeading = await screen.findByRole('heading', { name: 'Analytics' });
+    expect(analyticsHeading).toBeVisible();
+    // Switching tabs moves focus to the new tab's heading
+    await vi.waitFor(() => expect(analyticsHeading).toHaveFocus());
+    fireEvent.click(tabs.getByRole('button', { name: 'Vocabulary' }));
+    const vocabHeading = await screen.findByRole('heading', { name: 'Vocabulary Study' });
+    expect(vocabHeading).toBeVisible();
+    await vi.waitFor(() => expect(vocabHeading).toHaveFocus());
+    fireEvent.click(tabs.getByRole('button', { name: 'Trivia' }));
+    expect(screen.getByRole('heading', { name: 'Trivia Study' })).toHaveFocus();
 
     // Switching tabs doesn't remount the page and lose the session
     expect(reviewed()).toBe('1');
@@ -71,7 +78,7 @@ describe('App', () => {
     render(<App />);
     expect(screen.getByText('Loading...')).toBeInTheDocument();
     await act(async () => mock().emit('INITIAL_SESSION', null));
-    expect(screen.getByRole('heading', { name: 'Adaptive Learning' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Study Deck' })).toBeInTheDocument();
   });
 
   it('asks for a new password after a reset link, and can be dismissed', async () => {
