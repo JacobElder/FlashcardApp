@@ -6,7 +6,7 @@ interface MyFactsProps {
   deck: FactDeck;
   /** This deck's facts. */
   facts: UserFact[];
-  categories: string[];
+  categories: readonly string[];
   /** Pre-selected category for new facts. */
   defaultCategory: string;
 }

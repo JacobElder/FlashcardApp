@@ -3,6 +3,7 @@ import { triviaCards, TRIVIA_CATEGORIES } from './triviaCards';
 import { vocabularyCards } from './vocabularyCards';
 import { dataScienceCards, DATA_SCIENCE_CATEGORIES } from './dataScienceCards';
 import type { VocabularyCard } from '../types';
+import { mcAnswerText } from '../hooks/useMultipleChoice';
 
 const CATEGORIES: readonly string[] = TRIVIA_CATEGORIES;
 const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -197,5 +198,13 @@ describe('trivia deck conventions', () => {
 
   it('has no near-duplicate questions', () => {
     expect(nearDuplicates(triviaCards.map(c => ({ id: c.id, text: c.front })))).toEqual([]);
+  });
+});
+
+describe('trivia multiple-choice balance', () => {
+  it('does not make the answer (as shown among the options) the longest option much more often than chance', () => {
+    // With the answer among 4 options, chance is 25%
+    const longest = triviaCards.filter(c => mcAnswerText(c).length > Math.max(...(c.options ?? []).map(o => o.length)));
+    expect(longest.length / triviaCards.length).toBeLessThanOrEqual(0.3);
   });
 });

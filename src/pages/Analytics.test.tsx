@@ -1,11 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-
-vi.mock('recharts', () => {
-  const Stub = ({ children }: { children?: React.ReactNode }) => <div>{children}</div>;
-  const LineChart = ({ data }: { data: unknown[] }) => <div data-testid="chart">{data.length} points</div>;
-  return { LineChart, Line: Stub, XAxis: Stub, YAxis: Stub, CartesianGrid: Stub, Tooltip: Stub, ResponsiveContainer: Stub, ReferenceLine: Stub };
-});
 
 import { Analytics } from './Analytics';
 import { STORAGE_KEYS, setToStorage } from '../lib/storage';
@@ -23,7 +17,7 @@ describe('Analytics', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Vocabulary' }));
     expect(screen.getByRole('button', { name: 'Vocabulary' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByTestId('chart')).toHaveTextContent('2 points');
+    expect(screen.getByRole('img', { name: /Skill level over 2 answers, from 0.1 to 0.5/ })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Data Sci' }));
     expect(screen.getByRole('button', { name: 'Data Sci' })).toHaveAttribute('aria-pressed', 'true');

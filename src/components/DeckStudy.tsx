@@ -163,7 +163,7 @@ export function DeckStudy({ isActive, title, deck, cards: builtInCards, categori
             <MyFacts
               deck={deck}
               facts={deckFacts}
-              categories={[...deckCategories]}
+              categories={deckCategories}
               defaultCategory={selectedCategory !== 'All' && deckCategories.includes(selectedCategory) ? selectedCategory : deckCategories[0]}
             />
           </>

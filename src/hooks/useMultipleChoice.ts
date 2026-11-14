@@ -14,6 +14,18 @@ export interface MultipleChoice {
 }
 
 /**
+ * The answer as shown among the MC options. A trailing note in parentheses
+ * ("Lead (from Latin plumbum)") would mark the answer out from bare
+ * distractors, so it's dropped unless the distractors carry notes too; the
+ * full answer is shown once the user has picked.
+ */
+export function mcAnswerText(card: Pick<FlashCard, 'back' | 'options'>): string {
+  if (card.options?.some(o => o.includes('('))) return card.back;
+  const stripped = card.back.replace(/\s*\([^()]*\)\s*$/, '').trim();
+  return stripped.length > 0 ? stripped : card.back;
+}
+
+/**
  * State for a multiple-choice card: the shuffled options and the user's pick.
  * The result stays on screen until `next` is called, rather than on a timer.
  */
@@ -29,14 +41,14 @@ export function useMultipleChoice(
 
   const options = useMemo(() => {
     if (!active || !card?.options) return [];
-    const all = [...card.options, card.back];
+    const all = [...card.options, mcAnswerText(card)];
     // Fisher-Yates shuffle
     for (let i = all.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [all[i], all[j]] = [all[j], all[i]];
     }
     return all;
-  }, [active, card?.options, card?.back]);
+  }, [active, card]);
 
   const selected = pick && pick.key === key ? pick.option : null;
 
@@ -48,7 +60,7 @@ export function useMultipleChoice(
   const next = useCallback(() => {
     if (selected === null || !card) return;
     setPick(null);
-    onAnswer(selected === card.back);
+    onAnswer(selected === mcAnswerText(card));
   }, [selected, card, onAnswer]);
 
   const reset = useCallback(() => setPick(null), []);
