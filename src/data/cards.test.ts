@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { triviaCards, TRIVIA_CATEGORIES } from './triviaCards';
 import { vocabularyCards } from './vocabularyCards';
 import { dataScienceCards, DATA_SCIENCE_CATEGORIES } from './dataScienceCards';
+import type { VocabularyCard } from '../types';
 
 const CATEGORIES: readonly string[] = TRIVIA_CATEGORIES;
 const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -34,7 +35,36 @@ const DISTINCT_PAIRS = new Set([
   'sport-2/sport-108', // soccer vs. rugby World Cup
   'sport-8/sport-86', // touchdown vs. safety
   'sci-67/nyc-pub-1573', // planets vs. gas giants
+  'ds-160/ds-161', // when to favor recall vs. precision
 ]);
+
+/** Every pair of items whose meaningful words overlap enough to look like the same question. */
+function nearDuplicates(items: { id: string; text: string }[]): string[] {
+  const words = items.map(item => ({ id: item.id, words: contentWords(item.text) }));
+  const pairs: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    for (let j = i + 1; j < words.length; j++) {
+      const [a, b] = [words[i], words[j]];
+      if (a.words.size < 2 || b.words.size < 2) continue;
+      const key = `${a.id}/${b.id}`;
+      if (overlap(a.words, b.words) >= NEAR_DUPLICATE && !DISTINCT_PAIRS.has(key)) pairs.push(key);
+    }
+  }
+  return pairs;
+}
+
+/** Lowercased words joined by single spaces, padded so `includes` matches whole words only. */
+const wordText = (s: string) => ` ${s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
+
+/** The answer with any parenthetical aside and a leading article removed. */
+const coreAnswer = (back: string) =>
+  wordText(back.replace(/\([^)]*\)/g, ' ').replace(/^\s*(the|a|an)\s+/i, ''));
+
+/** Cards whose question legitimately names the answer (e.g. the answer is a common word in the question). */
+const ANSWER_IN_QUESTION_OK = new Set<string>([]);
+
+/** Vocabulary entries whose definition must quote the headword's source (user decision). */
+const WORD_IN_DEFINITION_OK = new Set(['vocab-112']);
 
 describe.each([
   ['trivia', triviaCards],
@@ -69,6 +99,49 @@ describe.each([
     ));
     expect(bad.map(c => c.id)).toEqual([]);
   });
+
+  it('has no leading or trailing whitespace', () => {
+    const untrimmed = cards.filter(c => {
+      const vocab = c as Partial<VocabularyCard>;
+      return [c.front, c.back, c.hint ?? '', vocab.word ?? '', vocab.definition ?? '', vocab.example ?? '', ...(c.options ?? [])]
+        .some(text => text !== text.trim());
+    });
+    expect(untrimmed.map(c => c.id)).toEqual([]);
+  });
+
+  it('has IRT parameters in range wherever they are set', () => {
+    const inRange = (value: number | undefined, min: number, max: number) =>
+      value === undefined || (Number.isFinite(value) && value >= min && value <= max);
+    const bad = cards.filter(c =>
+      !inRange(c.difficulty, -4, 4) || !inRange(c.mcDifficulty, -4, 4) ||
+      !inRange(c.discrimination, 0.1, 4) || !inRange(c.mcDiscrimination, 0.1, 4)
+    );
+    expect(bad.map(c => c.id)).toEqual([]);
+  });
+});
+
+describe.each([
+  ['trivia', triviaCards],
+  ['data science', dataScienceCards],
+] as const)('%s multiple choice', (_name, cards) => {
+  it('gives every card exactly 3 distinct distractors, none matching the answer', () => {
+    const bad = cards.filter(c => {
+      const options = c.options ?? [];
+      return options.length !== 3 ||
+        new Set(options.map(o => o.trim().toLowerCase())).size !== 3 ||
+        options.some(o => o.trim().toLowerCase() === c.back.trim().toLowerCase());
+    });
+    expect(bad.map(c => `${c.id}: ${JSON.stringify(c.options)}`)).toEqual([]);
+  });
+
+  it('never gives the answer away in the question', () => {
+    const leaks = cards.filter(c => {
+      if (ANSWER_IN_QUESTION_OK.has(c.id)) return false;
+      const answer = coreAnswer(c.back);
+      return answer.trim().length >= 4 && wordText(c.front).includes(answer);
+    });
+    expect(leaks.map(c => `${c.id}: ${c.back}`)).toEqual([]);
+  });
 });
 
 describe('data science deck', () => {
@@ -79,6 +152,29 @@ describe('data science deck', () => {
 
   it('uses ds-N ids that no other deck uses', () => {
     expect(dataScienceCards.filter(c => !/^ds-\d+$/.test(c.id)).map(c => c.id)).toEqual([]);
+  });
+
+  it('has no near-duplicate questions', () => {
+    expect(nearDuplicates(dataScienceCards.map(c => ({ id: c.id, text: c.front })))).toEqual([]);
+  });
+
+  it('does not make the answer the longest option in most cards', () => {
+    // Otherwise "pick the longest" beats knowing the material in multiple-choice mode.
+    const longest = dataScienceCards.filter(c => c.back.length > Math.max(...(c.options ?? []).map(o => o.length)));
+    expect(longest.length / dataScienceCards.length).toBeLessThanOrEqual(0.5);
+  });
+});
+
+describe('vocabulary deck', () => {
+  it('has no near-duplicate definitions', () => {
+    expect(nearDuplicates(vocabularyCards.map(c => ({ id: c.id, text: c.definition })))).toEqual([]);
+  });
+
+  it('defines each word without using the word itself', () => {
+    const circular = vocabularyCards.filter(c =>
+      !WORD_IN_DEFINITION_OK.has(c.id) && wordText(c.definition).includes(wordText(c.word))
+    );
+    expect(circular.map(c => `${c.id}: ${c.word}`)).toEqual([]);
   });
 });
 
@@ -100,33 +196,6 @@ describe('trivia deck conventions', () => {
   });
 
   it('has no near-duplicate questions', () => {
-    const words = triviaCards.map(card => ({ id: card.id, words: contentWords(card.front) }));
-    const pairs: string[] = [];
-    for (let i = 0; i < words.length; i++) {
-      for (let j = i + 1; j < words.length; j++) {
-        const [a, b] = [words[i], words[j]];
-        if (a.words.size < 2 || b.words.size < 2) continue;
-        const key = `${a.id}/${b.id}`;
-        if (overlap(a.words, b.words) >= NEAR_DUPLICATE && !DISTINCT_PAIRS.has(key)) pairs.push(key);
-      }
-    }
-    expect(pairs).toEqual([]);
-  });
-
-  it('has no leading or trailing whitespace', () => {
-    const untrimmed = triviaCards.filter(c =>
-      [c.front, c.back, c.hint ?? '', ...(c.options ?? [])].some(text => text !== text.trim())
-    );
-    expect(untrimmed.map(c => c.id)).toEqual([]);
-  });
-
-  it('has IRT parameters in range wherever they are set', () => {
-    const inRange = (value: number | undefined, min: number, max: number) =>
-      value === undefined || (Number.isFinite(value) && value >= min && value <= max);
-    const bad = triviaCards.filter(c =>
-      !inRange(c.difficulty, -4, 4) || !inRange(c.mcDifficulty, -4, 4) ||
-      !inRange(c.discrimination, 0.1, 4) || !inRange(c.mcDiscrimination, 0.1, 4)
-    );
-    expect(bad.map(c => c.id)).toEqual([]);
+    expect(nearDuplicates(triviaCards.map(c => ({ id: c.id, text: c.front })))).toEqual([]);
   });
 });
