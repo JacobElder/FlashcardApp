@@ -46,6 +46,7 @@ interface UseAdaptiveTestingReturn {
   totalCards: number;
   /** Cards due for review (including new ones) that haven't been seen this session. */
   dueCount: number;
+  /** Average Leitner progress across the deck, 0-100 (see deckMastery). */
   masteryLevel: number;
   hasMoreCards: boolean;
   /** Nothing is due; the user can choose to study ahead. */
@@ -76,15 +77,29 @@ function newSession(): StudySession {
 
 /**
  * Next Leitner box for a rating. "Hard" is a correct answer that doesn't earn
- * a longer interval, in either format. A correct MC answer can't move a card
- * past MC_BOX_CAP on its own, but never demotes one already above it.
+ * a longer interval, in either format (a box 0 card stays in box 0 and comes
+ * back next session). A correct MC answer can't move a card past MC_BOX_CAP
+ * on its own, but never demotes one already above it.
  */
 export function nextBox(box: number, rating: Rating, format: CardFormat): number {
   if (rating < RATING_VALUES.hard) return 0;
-  if (rating === RATING_VALUES.hard) return Math.max(1, box);
+  if (rating === RATING_VALUES.hard) return box;
   if (format === 'mc') return box >= MC_BOX_CAP ? box : box + 1;
   if (rating === RATING_VALUES.easy) return Math.min(MAX_BOX, box + 2);
   return Math.min(MAX_BOX, box + 1);
+}
+
+/**
+ * Overall mastery (0-100): average Leitner progress across the deck, where a
+ * card in the top box counts fully and an unanswered card counts as zero.
+ */
+export function deckMastery(cards: FlashCard[], cardHistory: Record<string, IRTCardHistory>): number {
+  if (cards.length === 0) return 0;
+  const progress = cards.reduce(
+    (total, card) => total + Math.min(MAX_BOX, Math.max(0, cardHistory[card.id]?.leitnerBox ?? 0)) / MAX_BOX,
+    0
+  );
+  return Math.round((progress / cards.length) * 100);
 }
 
 export function useAdaptiveTesting({
@@ -161,11 +176,10 @@ export function useAdaptiveTesting({
   const currentCard = selection?.card ?? null;
   const currentFormat = selection?.format ?? 'open';
 
-  // Mastery level approximation (normalized ability score from -4 to 4 -> 0 to 100)
-  const masteryLevel = useMemo(() => {
-    const score = ((irtProfile.ability + 4) / 8) * 100;
-    return Math.max(0, Math.min(100, Math.round(score)));
-  }, [irtProfile.ability]);
+  const masteryLevel = useMemo(
+    () => deckMastery(cards, irtProfile.cardHistory),
+    [cards, irtProfile.cardHistory]
+  );
 
   const flipCard = useCallback(() => {
     setIsFlipped(prev => !prev);
@@ -208,9 +222,15 @@ export function useAdaptiveTesting({
       isCorrect
     );
 
-    const box = nextBox(history.leitnerBox ?? 0, rating, currentFormat);
+    // Studying a card before it's due (studying ahead, trouble drills) can't
+    // promote it or push its review out, but a miss still demotes it
+    const currentBox = history.leitnerBox ?? 0;
+    const wasDue = isDue(irtProfile.cardHistory[currentCard.id], now.getTime());
+    const box = wasDue || !isCorrect ? nextBox(currentBox, rating, currentFormat) : currentBox;
     const intervalBox = currentFormat === 'mc' ? Math.min(box, MC_BOX_CAP) : box;
-    const nextReview = reviewDateFor(now, BOX_INTERVAL_DAYS[intervalBox]);
+    const nextReview = wasDue || !isCorrect
+      ? reviewDateFor(now, BOX_INTERVAL_DAYS[intervalBox]).toISOString()
+      : history.nextReviewDate;
 
     const isMc = currentFormat === 'mc';
     const answeredInFormat = isMc ? history.mcTimesAnswered ?? 0 : history.timesAnswered;
@@ -220,7 +240,7 @@ export function useAdaptiveTesting({
       ...history,
       lastAnsweredDate: now.toISOString(),
       leitnerBox: box,
-      nextReviewDate: nextReview.toISOString(),
+      nextReviewDate: nextReview,
       correctStreak: isCorrect ? (history.correctStreak ?? 0) + 1 : 0,
       ...(isMc
         ? {

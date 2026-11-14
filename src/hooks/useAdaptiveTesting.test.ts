@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
-import { nextBox, useAdaptiveTesting } from './useAdaptiveTesting';
+import { deckMastery, nextBox, useAdaptiveTesting } from './useAdaptiveTesting';
+import { triviaCards } from '../data/triviaCards';
 import { MAX_ABILITY_HISTORY } from '../lib/merge';
 import { RATING_VALUES, type FlashCard, type IRTProfile } from '../types';
 import { STORAGE_KEYS, getFromStorage, getIncorrectCounts, getStudyStats, setToStorage } from '../lib/storage';
@@ -118,7 +119,8 @@ describe('nextBox', () => {
     // [box, rating, format, expected]
     [0, RATING_VALUES.again, 'open', 0],
     [4, RATING_VALUES.again, 'open', 0],
-    [0, RATING_VALUES.hard, 'open', 1],
+    [0, RATING_VALUES.hard, 'open', 0],
+    [1, RATING_VALUES.hard, 'open', 1],
     [3, RATING_VALUES.hard, 'open', 3],
     [0, RATING_VALUES.good, 'open', 1],
     [5, RATING_VALUES.good, 'open', 5],
@@ -219,16 +221,15 @@ describe('useAdaptiveTesting scheduling', () => {
 });
 
 describe('useAdaptiveTesting multiple choice', () => {
-  // Open recall is far too hard at ability 0, so MC is the more informative format
+  // A card with options whose last answer was a miss is shown as MC
   const mcCard: FlashCard = {
-    id: 'mc', type: 'trivia', front: 'Q', back: 'A', category: 'Science',
-    options: ['x', 'y', 'z'], difficulty: 4, mcDifficulty: 0,
+    id: 'mc', type: 'trivia', front: 'Q', back: 'A', category: 'Science', options: ['x', 'y', 'z'],
   };
 
   it('rates in MC format: MC counters move, open-recall counters do not, and the box is capped', () => {
     setToStorage<IRTProfile>(KEY, {
       ability: 0,
-      cardHistory: { mc: { cardId: 'mc', timesAnswered: 3, timesCorrect: 2, leitnerBox: 2 } },
+      cardHistory: { mc: { cardId: 'mc', timesAnswered: 3, timesCorrect: 2, leitnerBox: 2, correctStreak: 0 } },
     });
     const { result } = render({ cards: [mcCard] });
     expect(result.current.currentFormat).toBe('mc');
@@ -249,7 +250,7 @@ describe('useAdaptiveTesting multiple choice', () => {
   it('keeps a high box but schedules no further out than the MC cap', () => {
     setToStorage<IRTProfile>(KEY, {
       ability: 0,
-      cardHistory: { mc: { cardId: 'mc', timesAnswered: 5, timesCorrect: 5, leitnerBox: 5 } },
+      cardHistory: { mc: { cardId: 'mc', timesAnswered: 5, timesCorrect: 4, leitnerBox: 5, correctStreak: 0 } },
     });
     const { result } = render({ cards: [mcCard] });
     act(() => result.current.rateCard(RATING_VALUES.easy));
@@ -389,5 +390,59 @@ describe('correct-answer streak', () => {
     expect(streak()).toBe(2);
     rate(RATING_VALUES.again);
     expect(streak()).toBe(0);
+  });
+});
+
+describe('multiple choice with real deck cards', () => {
+  it('shows a new trivia card with options as MC', () => {
+    const deck = triviaCards.filter(c => c.options?.length).slice(0, 30);
+    const { result } = render({ cards: deck });
+    expect(result.current.currentFormat).toBe('mc');
+    act(() => result.current.rateCard(RATING_VALUES.good));
+    expect(readProfile().cardHistory[deck.find(c => readProfile().cardHistory[c.id])!.id].mcTimesAnswered).toBe(1);
+  });
+});
+
+describe('studying ahead', () => {
+  const future = () => new Date(Date.now() + 86400000 * 5).toISOString();
+
+  it('does not promote a card that is not due yet, but still updates IRT', () => {
+    const reviewAt = future();
+    setToStorage<IRTProfile>(KEY, {
+      ability: 0,
+      cardHistory: Object.fromEntries(cards.map(c => [c.id, { cardId: c.id, timesAnswered: 1, timesCorrect: 1, leitnerBox: 2, nextReviewDate: reviewAt }])),
+    });
+    const { result } = render();
+    act(() => result.current.studyAhead());
+    const id = result.current.currentCard!.id;
+    act(() => result.current.rateCard(RATING_VALUES.easy));
+    const h = readProfile().cardHistory[id];
+    expect(h.leitnerBox).toBe(2);
+    expect(h.nextReviewDate).toBe(reviewAt);
+    expect(h.timesAnswered).toBe(2);
+    expect(readProfile().ability).toBeGreaterThan(0);
+  });
+
+  it('still demotes a not-yet-due card on "Again"', () => {
+    setToStorage<IRTProfile>(KEY, {
+      ability: 0,
+      cardHistory: Object.fromEntries(cards.map(c => [c.id, { cardId: c.id, timesAnswered: 1, timesCorrect: 1, leitnerBox: 3, nextReviewDate: future() }])),
+    });
+    const { result } = render({ ignoreSchedule: true });
+    const id = result.current.currentCard!.id;
+    act(() => result.current.rateCard(RATING_VALUES.again));
+    expect(readProfile().cardHistory[id].leitnerBox).toBe(0);
+  });
+});
+
+describe('mastery', () => {
+  it('is 0 for an unstudied deck, not 50%', () => {
+    expect(render().result.current.masteryLevel).toBe(0);
+  });
+
+  it('averages Leitner progress across the deck', () => {
+    const history = { a: { cardId: 'a', timesAnswered: 5, timesCorrect: 5, leitnerBox: 5 }, b: { cardId: 'b', timesAnswered: 2, timesCorrect: 2, leitnerBox: 5 } };
+    expect(deckMastery(cards, history)).toBe(50);
+    expect(deckMastery([], history)).toBe(0);
   });
 });
