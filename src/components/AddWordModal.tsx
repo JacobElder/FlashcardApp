@@ -16,6 +16,18 @@ interface AddWordModalProps {
 
 const EMPTY_FORM: NewWordFormData = { word: '', definition: '', partOfSpeech: '', example: '' };
 
+/** The form's starting values for editing a word, or adding one (optionally prefilled). */
+function initialForm(initialData?: VocabularyCard, initialWord?: string): NewWordFormData {
+  return initialData
+    ? {
+        word: initialData.word,
+        definition: initialData.definition,
+        partOfSpeech: initialData.partOfSpeech ?? '',
+        example: initialData.example ?? '',
+      }
+    : { ...EMPTY_FORM, word: initialWord ?? '' };
+}
+
 export function AddWordModal({ isOpen, onClose, onSave, initialData, initialWord, existingWords }: AddWordModalProps) {
   const [formData, setFormData] = useState<NewWordFormData>(EMPTY_FORM);
   const [errors, setErrors] = useState<Partial<NewWordFormData>>({});
@@ -37,14 +49,7 @@ export function AddWordModal({ isOpen, onClose, onSave, initialData, initialWord
     lookupToken.current += 1;
     setIsLoading(false);
     if (!isOpen) return;
-    setFormData(initialData
-      ? {
-          word: initialData.word,
-          definition: initialData.definition,
-          partOfSpeech: initialData.partOfSpeech ?? '',
-          example: initialData.example ?? '',
-        }
-      : { ...EMPTY_FORM, word: initialWord ?? '' });
+    setFormData(initialForm(initialData, initialWord));
     setErrors({});
     setFetchError('');
   }, [isOpen, initialData, initialWord]);
@@ -112,12 +117,8 @@ export function AddWordModal({ isOpen, onClose, onSave, initialData, initialWord
     onClose();
   };
 
+  // The Auto-fill button is disabled until a word is typed
   const handleAutoFill = async () => {
-    if (!formData.word.trim()) {
-      setErrors({ word: 'Please enter a word to auto-fill' });
-      return;
-    }
-
     setIsLoading(true);
     setFetchError('');
     const token = ++lookupToken.current;
@@ -159,12 +160,21 @@ export function AddWordModal({ isOpen, onClose, onSave, initialData, initialWord
 
   if (!isOpen) return null;
 
+  // A click outside the dialog closes it only when nothing has been typed, so
+  // a stray tap can't silently throw away a half-written word.
+  const start = initialForm(initialData, initialWord);
+  const isDirty = (Object.keys(start) as (keyof NewWordFormData)[])
+    .some(field => (formData[field] ?? '') !== (start[field] ?? ''));
+  const handleBackdropClick = () => {
+    if (!isDirty) onClose();
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
+        onClick={handleBackdropClick}
         aria-hidden="true"
       />
 
@@ -185,7 +195,7 @@ export function AddWordModal({ isOpen, onClose, onSave, initialData, initialWord
             <button
               type="button"
               onClick={onClose}
-              className="text-slate-400 hover:text-white transition-colors p-1"
+              className="text-slate-400 hover:text-white transition-colors p-2.5 -m-1.5"
               aria-label="Close dialog"
             >
               <svg

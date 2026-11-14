@@ -1,12 +1,14 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useId } from 'react';
 import { FlashCard } from './FlashCard';
 import { SkipButton } from './SkipButton';
-import { RatingButtons } from './RatingButtons';
-import { ProgressBar } from './ProgressBar';
+import { StickyRatingBar } from './StickyRatingBar';
 import { EmptyState } from './EmptyState';
 import { CategoryFilter } from './CategoryFilter';
 import { ConfidenceButtons } from './ConfidenceButtons';
-import { SessionSummary } from './SessionSummary';
+import { StudyHeader } from './StudyHeader';
+import { StudyStats, SessionTally } from './StudyStats';
+import { SessionEndState } from './SessionEndState';
+import { useMultipleChoice } from '../hooks/useMultipleChoice';
 import { useAdaptiveTesting } from '../hooks/useAdaptiveTesting';
 import { useStorageValue } from '../hooks/useStorageValue';
 import { useStudyShortcuts } from '../hooks/useStudyShortcuts';
@@ -16,7 +18,7 @@ import {
   currentStreak,
   TROUBLE_GRADUATION_STREAK,
   troubleCardIdsFrom,
-  type StudyStats,
+  type StudyStats as StudyStatsData,
 } from '../lib/storage';
 import { MyFacts } from './MyFacts';
 import { EMPTY_FACTS, factsToCards } from '../lib/facts';
@@ -24,6 +26,7 @@ import type { FactDeck, IRTProfile, TriviaCard, UserFacts } from '../types';
 
 const NO_COUNTS: Record<string, number> = {};
 const EMPTY_PROFILE: IRTProfile = { ability: 0, cardHistory: {} };
+const TROUBLE_HELP = `Drill cards you've missed more than once. A card leaves the list after ${TROUBLE_GRADUATION_STREAK} correct answers in a row.`;
 
 export interface DeckStudyProps {
   /** Whether this tab is visible (keyboard shortcuts only apply then). */
@@ -44,7 +47,7 @@ export interface DeckStudyProps {
 export function DeckStudy({ isActive, title, deck, cards: builtInCards, categories: deckCategories, storageKey, cardNoun }: DeckStudyProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [troubleOnly, setTroubleOnly] = useState(false);
-  const stats = useStorageValue<StudyStats>(STORAGE_KEYS.STUDY_STATS, EMPTY_STUDY_STATS);
+  const stats = useStorageValue<StudyStatsData>(STORAGE_KEYS.STUDY_STATS, EMPTY_STUDY_STATS);
   // The user's own facts that have an answer are studied alongside the built-in cards
   const userFacts = useStorageValue<UserFacts>(STORAGE_KEYS.USER_FACTS, EMPTY_FACTS);
   const deckFacts = useMemo(() => userFacts.facts.filter(f => f.deck === deck), [userFacts, deck]);
@@ -119,6 +122,21 @@ export function DeckStudy({ isActive, title, deck, cards: builtInCards, categori
     (isCorrect: boolean) => rateCard(isCorrect ? 4 : 0),
     [rateCard]
   );
+  const mc = useMultipleChoice(currentCard, currentFormat, handleMultipleChoice);
+  const mcAnswered = mc.selected !== null;
+
+  const { options: mcOptions, select: mcSelect, next: mcNext } = mc;
+  const mcShortcuts = useMemo(
+    () => currentFormat === 'mc'
+      ? {
+          optionCount: mcOptions.length,
+          answered: mcAnswered,
+          onSelect: (index: number) => { if (mcOptions[index] !== undefined) mcSelect(mcOptions[index]); },
+          onNext: mcNext,
+        }
+      : undefined,
+    [currentFormat, mcOptions, mcAnswered, mcSelect, mcNext]
+  );
 
   useStudyShortcuts({
     enabled: isActive && hasMoreCards,
@@ -127,140 +145,107 @@ export function DeckStudy({ isActive, title, deck, cards: builtInCards, categori
     onFlip: flipCard,
     onRate: rateCard,
     onSkip: skipCard,
+    canSkip: !mcAnswered,
+    multipleChoice: mcShortcuts,
   });
+
+  const troubleHelpId = useId();
 
   return (
     <div className="min-h-screen bg-slate-900 pb-20">
-      {/* Header */}
-      <header className="bg-slate-800 border-b border-slate-700 px-4 py-4">
-        <div className="flex items-center justify-between mb-3">
-          <h1 className="text-xl font-bold text-white">{title}</h1>
-          {streak > 0 && (
-            <div className="flex items-center gap-1 text-amber-400 text-sm font-semibold">
-              <span aria-hidden="true">🔥</span>
-              <span>{streak} day{streak !== 1 ? 's' : ''} streak</span>
-            </div>
-          )}
+      <StudyHeader
+        title={title}
+        streak={streak}
+        masteryLevel={masteryLevel}
+        details={
+          <>
+            <StudyStats ability={userAbility} totalCards={totalCards} dueCount={dueCount} reviewed={session.cardsReviewed} />
+            <MyFacts
+              deck={deck}
+              facts={deckFacts}
+              categories={[...deckCategories]}
+              defaultCategory={selectedCategory !== 'All' && deckCategories.includes(selectedCategory) ? selectedCategory : deckCategories[0]}
+            />
+          </>
+        }
+      >
+        {/* Category and trouble filters stay visible on every screen size */}
+        <div className="py-2 sm:py-3 border-b border-slate-800">
+          <CategoryFilter
+            categories={categories}
+            selected={selectedCategory}
+            onChange={(cat) => { mc.reset(); changeFilter(cat, false); }}
+            leading={
+              <button
+                type="button"
+                onClick={() => { mc.reset(); changeFilter(selectedCategory, !troubleOnly); }}
+                aria-pressed={troubleOnly}
+                aria-describedby={troubleHelpId}
+                title={TROUBLE_HELP}
+                className={`min-h-11 md:min-h-9 text-sm px-3 rounded-full font-medium whitespace-nowrap transition-colors ${
+                  troubleOnly
+                    ? 'bg-red-600 text-white'
+                    : troubleCount > 0
+                      ? 'bg-slate-700 text-red-300 border border-red-700'
+                      : 'bg-slate-700 text-slate-300'
+                }`}
+              >
+                ⚠ Trouble{troubleCount > 0 ? ` (${troubleCount})` : ''}
+              </button>
+            }
+          />
+          <p id={troubleHelpId} className={troubleOnly ? 'text-xs text-slate-400 px-4 pt-2 text-center' : 'sr-only'}>
+            {TROUBLE_HELP}
+          </p>
         </div>
-        <ProgressBar value={masteryLevel} label="Overall Mastery" showPercentage color="gradient" />
-      </header>
-
-      {/* Category Filter */}
-      <div className="py-3 border-b border-slate-800">
-        <CategoryFilter
-          categories={categories}
-          selected={selectedCategory}
-          onChange={(cat) => changeFilter(cat, false)}
-        />
-      </div>
-
-      {/* Stats row */}
-      <div className="flex justify-center gap-4 py-3 px-4 border-b border-slate-800 flex-wrap">
-        <div className="text-center">
-          <p className="text-2xl font-bold text-purple-400">{userAbility.toFixed(2)}</p>
-          <p className="text-xs text-slate-400">Ability (θ)</p>
-        </div>
-        <div className="text-center">
-          <p className="text-2xl font-bold text-slate-300">{totalCards}</p>
-          <p className="text-xs text-slate-400">Total Cards</p>
-        </div>
-        <div className="text-center">
-          <p className="text-2xl font-bold text-sky-400">{dueCount}</p>
-          <p className="text-xs text-slate-400">Due / New</p>
-        </div>
-        <div className="text-center">
-          <p className="text-2xl font-bold text-amber-400">{session.cardsReviewed}</p>
-          <p className="text-xs text-slate-400">Reviewed</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => changeFilter(selectedCategory, !troubleOnly)}
-          aria-pressed={troubleOnly}
-          className={`text-xs px-3 py-1 rounded-full font-medium self-center transition-colors ${
-            troubleOnly
-              ? 'bg-red-600 text-white'
-              : troubleCount > 0
-                ? 'bg-slate-700 text-red-400 border border-red-700'
-                : 'bg-slate-700 text-slate-400'
-          }`}
-        >
-          ⚠ Trouble{troubleCount > 0 ? ` (${troubleCount})` : ''}
-        </button>
-      </div>
-
-      <MyFacts
-        deck={deck}
-        facts={deckFacts}
-        categories={[...deckCategories]}
-        defaultCategory={selectedCategory !== 'All' && deckCategories.includes(selectedCategory) ? selectedCategory : deckCategories[0]}
-      />
+      </StudyHeader>
 
       {/* Main Content */}
-      <main className="px-4 py-6">
+      <main className="px-4 py-4 sm:py-6">
         {!hasMoreCards ? (
-          session.cardsReviewed > 0 ? (
-            <SessionSummary session={session} onReset={resetSession} />
-          ) : skippedCount > 0 ? (
-            <EmptyState
-              title="Nothing Left This Session"
-              description="You skipped the remaining cards. Start over to see them again."
-              icon="cards"
-              action={{ label: 'Start Over', onClick: resetSession }}
-            />
-          ) : troubleOnly && troubleCount === 0 ? (
-            <EmptyState
-              title="No Trouble Cards Yet"
-              description={`Keep studying — cards you miss more than once appear here until you get them right ${TROUBLE_GRADUATION_STREAK} times in a row.`}
-              icon="cards"
-              action={{ label: 'Back to All', onClick: () => changeFilter(selectedCategory, false) }}
-            />
-          ) : isCaughtUp && totalCards > 0 ? (
-            <EmptyState
-              title="All Caught Up!"
-              description="Nothing in this deck is due for review. Come back later, or study ahead now."
-              icon="check"
-              action={{ label: 'Study Ahead', onClick: studyAhead }}
-            />
-          ) : (
-            <EmptyState
-              title="No Cards Available"
-              description={`There are no ${cardNoun} in this selection.`}
-              icon="cards"
-            />
-          )
+          <SessionEndState
+            session={session}
+            skippedCount={skippedCount}
+            isCaughtUp={isCaughtUp}
+            totalCards={totalCards}
+            onReset={resetSession}
+            onStudyAhead={studyAhead}
+            caughtUpDescription="Nothing in this deck is due for review. Come back later, or study ahead now."
+            special={troubleOnly && troubleCount === 0 ? (
+              <EmptyState
+                title="No Trouble Cards Yet"
+                description={`Keep studying — cards you miss more than once appear here until you get them right ${TROUBLE_GRADUATION_STREAK} times in a row.`}
+                icon="cards"
+                action={{ label: 'Back to All', onClick: () => changeFilter(selectedCategory, false) }}
+              />
+            ) : null}
+            empty={
+              <EmptyState
+                title="No Cards Available"
+                description={`There are no ${cardNoun} in this selection.`}
+                icon="cards"
+              />
+            }
+          />
         ) : currentCard ? (
-          <div className="space-y-6">
+          <div className="space-y-4 sm:space-y-6">
             <FlashCard
               card={currentCard}
               isFlipped={isFlipped}
               onFlip={flipCard}
               format={currentFormat}
-              onMultipleChoiceSelect={handleMultipleChoice}
+              multipleChoice={mc}
             />
 
             {currentFormat !== 'mc' && !answerSeen && !hasPrediction && (
               <ConfidenceButtons onPredict={recordPrediction} />
             )}
 
-            <SkipButton onSkip={skipCard} />
+            {currentFormat !== 'mc' && isFlipped && <StickyRatingBar onRate={rateCard} />}
 
-            {currentFormat !== 'mc' && isFlipped && (
-              <div className="animate-fade-in">
-                <RatingButtons onRate={rateCard} />
-              </div>
-            )}
+            <SkipButton onSkip={skipCard} disabled={mcAnswered} />
 
-            {session.cardsReviewed > 0 && (
-              <div className="flex justify-center gap-4 text-sm flex-wrap">
-                <span className="text-emerald-400">✓ {session.correctCount}</span>
-                <span className="text-red-400">✗ {session.incorrectCount}</span>
-                {session.predictions.total > 0 && (
-                  <span className="text-amber-400" title="Prediction accuracy">
-                    🎯 {Math.round((session.predictions.correct / session.predictions.total) * 100)}%
-                  </span>
-                )}
-              </div>
-            )}
+            <SessionTally session={session} />
           </div>
         ) : null}
       </main>

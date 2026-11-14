@@ -10,7 +10,7 @@ test('loads under the GitHub Pages base path with no failed requests or errors',
   page.on('pageerror', error => errors.push(error.message));
 
   await page.goto('./');
-  await expect(page.getByRole('heading', { name: 'Adaptive Learning' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Study Deck' })).toBeVisible();
   expect(failures).toEqual([]);
   expect(errors).toEqual([]);
 });
@@ -35,5 +35,5 @@ test('keeps working offline once the service worker has installed', async ({ pag
 
   await context.setOffline(true);
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Adaptive Learning' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Study Deck' })).toBeVisible();
 });

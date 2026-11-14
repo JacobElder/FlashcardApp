@@ -88,6 +88,11 @@ describe('VocabularyStudy', () => {
     const [item] = getUserVocabulary().pending!;
     render(<VocabularyStudy isActive />);
     fireEvent.click(pendingList().getByRole('button', { name: 'Remove laconic' }));
+    // Asks first; Cancel keeps it
+    fireEvent.click(pendingList().getByRole('button', { name: 'Cancel' }));
+    expect(getUserVocabulary().pending).toHaveLength(1);
+    fireEvent.click(pendingList().getByRole('button', { name: 'Remove laconic' }));
+    fireEvent.click(pendingList().getByRole('button', { name: 'Remove' }));
     expect(getUserVocabulary().pending).toEqual([]);
     expect(getUserVocabulary().deletedIds).toContain(item.id);
   });

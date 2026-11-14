@@ -97,13 +97,14 @@ const tabs: TabConfig[] = [
 
 export function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-slate-800 border-t border-slate-700 safe-area-bottom">
+    <nav aria-label="Study sections" className="fixed bottom-0 left-0 right-0 z-20 bg-slate-800 border-t border-slate-700 safe-area-bottom">
       <div className="flex justify-around items-center h-16">
         {tabs.map((tab) => {
           const isActive = activeTab === tab.id;
           return (
             <button
               key={tab.id}
+              type="button"
               onClick={() => onTabChange(tab.id)}
               className={`flex flex-col items-center justify-center flex-1 h-full transition-colors ${
                 isActive

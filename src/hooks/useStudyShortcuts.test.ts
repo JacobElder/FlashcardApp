@@ -94,4 +94,34 @@ describe('useStudyShortcuts', () => {
     press('s');
     expect(onSkip).toHaveBeenCalledTimes(1);
   });
+
+  it('picks multiple-choice options with 1-N, then Enter/Space move on and S is off', () => {
+    const onSelect = vi.fn();
+    const onNext = vi.fn();
+    const mc = { optionCount: 4, answered: false, onSelect, onNext };
+    const { onSkip, onFlip, rerender } = setup({ canFlip: false, multipleChoice: mc });
+    press('5');
+    press('2');
+    expect(onSelect.mock.calls).toEqual([[1]]);
+
+    rerender({ canFlip: false, canSkip: false, multipleChoice: { ...mc, answered: true } });
+    press('3');
+    press('s');
+    press('Enter');
+    press(' ');
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSkip).not.toHaveBeenCalled();
+    expect(onFlip).not.toHaveBeenCalled();
+    expect(onNext).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not pick an option while typing in a field', () => {
+    const onSelect = vi.fn();
+    setup({ canFlip: false, multipleChoice: { optionCount: 4, answered: false, onSelect, onNext: vi.fn() } });
+    const input = document.createElement('input');
+    document.body.append(input);
+    press('1', {}, input);
+    expect(onSelect).not.toHaveBeenCalled();
+    input.remove();
+  });
 });

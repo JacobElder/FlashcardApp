@@ -1,7 +1,15 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { FlashCard } from './FlashCard';
+import { useMultipleChoice } from '../hooks/useMultipleChoice';
 import type { FlashCard as FlashCardType } from '../types';
+
+function McCard({ card, onAnswer = () => {}, onFlip = () => {} }: {
+  card: FlashCardType; onAnswer?: (isCorrect: boolean) => void; onFlip?: () => void;
+}) {
+  const mc = useMultipleChoice(card, 'mc', onAnswer);
+  return <FlashCard card={card} isFlipped={false} onFlip={onFlip} format="mc" multipleChoice={mc} />;
+}
 
 describe('FlashCard Component', () => {
   const mockCard: FlashCardType = {
@@ -60,34 +68,30 @@ describe('FlashCard Component', () => {
     expect(screen.queryByRole('button', { name: 'Show answer' })).not.toBeInTheDocument();
   });
 
-  it('reports a multiple-choice answer after showing feedback', () => {
-    vi.useFakeTimers();
-    const onSelect = vi.fn();
+  it('reports a multiple-choice answer only when Next is pressed, with icon and spoken feedback', () => {
+    const onAnswer = vi.fn();
     const mcCard = { ...mockCard, options: ['Lyon', 'Nice', 'Lille'] };
-    render(
-      <FlashCard card={mcCard} isFlipped={false} onFlip={() => {}} format="mc" onMultipleChoiceSelect={onSelect} />
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Paris' }));
-    expect(onSelect).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(1000);
-    expect(onSelect).toHaveBeenCalledWith(true);
-    vi.useRealTimers();
-  });
-
-  it('cancels a pending multiple-choice answer when unmounted', () => {
-    vi.useFakeTimers();
-    const onSelect = vi.fn();
-    const mcCard = { ...mockCard, options: ['Lyon', 'Nice', 'Lille'] };
-    const { unmount } = render(
-      <FlashCard card={mcCard} isFlipped={false} onFlip={() => {}} format="mc" onMultipleChoiceSelect={onSelect} />
-    );
+    render(<McCard card={mcCard} onAnswer={onAnswer} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Lyon' }));
-    unmount();
-    vi.advanceTimersByTime(1000);
-    expect(onSelect).not.toHaveBeenCalled();
-    vi.useRealTimers();
+    expect(onAnswer).not.toHaveBeenCalled();
+    expect(screen.getByRole('status')).toHaveTextContent('Incorrect — answer: Paris');
+    expect(screen.getByRole('button', { name: 'Paris' })).toHaveTextContent('✓');
+    expect(screen.getByRole('button', { name: 'Lyon' })).toHaveTextContent('✗');
+    // Focus moves to Next so Enter/Space continue
+    expect(screen.getByRole('button', { name: /Next/ })).toHaveFocus();
+
+    fireEvent.click(screen.getByRole('button', { name: /Next/ }));
+    expect(onAnswer).toHaveBeenCalledWith(false);
+  });
+
+  it('says "Correct" for the right option', () => {
+    const onAnswer = vi.fn();
+    render(<McCard card={{ ...mockCard, options: ['Lyon', 'Nice', 'Lille'] }} onAnswer={onAnswer} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Paris' }));
+    expect(screen.getByRole('status')).toHaveTextContent(/^Correct$/);
+    fireEvent.click(screen.getByRole('button', { name: /Next/ }));
+    expect(onAnswer).toHaveBeenCalledWith(true);
   });
 
   it('should render without category', () => {
@@ -132,23 +136,21 @@ describe('FlashCard interactions', () => {
 
   it('does not flip when an MC card or one of its options is clicked', () => {
     const onFlip = vi.fn();
-    render(<FlashCard card={card} isFlipped={false} onFlip={onFlip} format="mc" onMultipleChoiceSelect={() => {}} />);
+    render(<McCard card={card} onFlip={onFlip} />);
     fireEvent.click(screen.getByText('Largest planet?'));
     fireEvent.click(screen.getByRole('button', { name: 'Mars' }));
     expect(onFlip).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: 'Show answer' })).not.toBeInTheDocument();
   });
 
-  it('answers an MC card once, after the feedback delay, even if clicked twice', () => {
-    vi.useFakeTimers();
-    const onSelect = vi.fn();
-    render(<FlashCard card={card} isFlipped={false} onFlip={() => {}} format="mc" onMultipleChoiceSelect={onSelect} />);
+  it('keeps the first pick when an MC card is clicked twice', () => {
+    const onAnswer = vi.fn();
+    render(<McCard card={card} onAnswer={onAnswer} />);
     fireEvent.click(screen.getByRole('button', { name: 'Jupiter' }));
     fireEvent.click(screen.getByRole('button', { name: 'Mars' }));
-    expect(onSelect).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(1000);
-    expect(onSelect).toHaveBeenCalledTimes(1);
-    expect(onSelect).toHaveBeenCalledWith(true);
+    fireEvent.click(screen.getByRole('button', { name: /Next/ }));
+    expect(onAnswer).toHaveBeenCalledTimes(1);
+    expect(onAnswer).toHaveBeenCalledWith(true);
   });
 
   it('reveals the hint without flipping, and hides it again for the next card', () => {

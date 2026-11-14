@@ -1,8 +1,9 @@
-import { lazy, Suspense, useEffect, useState, useSyncExternalStore } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { TabNavigation } from './components/TabNavigation';
 import { Auth } from './components/Auth';
 import { AccountBar } from './components/AccountBar';
 import { ResetPassword } from './components/ResetPassword';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { getSupabase, missingSupabaseEnv } from './lib/supabase';
 import { claimLocalData, flushPush, hasUnsyncedChanges, startSync, stopSync } from './lib/sync';
 import { clearAllData, hasStorageWriteFailed, subscribeToStorageErrors } from './lib/storage';
@@ -66,6 +67,17 @@ function StorageWarning() {
   );
 }
 
+/** One tab's page: kept mounted once visited, with its own loading and crash fallback. */
+function TabPanel({ tab, activeTab, children }: { tab: TabType; activeTab: TabType; children: React.ReactNode }) {
+  return (
+    <div id={`tab-panel-${tab}`} hidden={activeTab !== tab}>
+      <ErrorBoundary>
+        <Suspense fallback={<FullScreenMessage>Loading...</FullScreenMessage>}>{children}</Suspense>
+      </ErrorBoundary>
+    </div>
+  );
+}
+
 function AuthenticatedApp() {
   const [activeTab, setActiveTab] = useState<TabType>(initialTab);
   // Tabs stay mounted after their first visit so switching tabs doesn't end a session
@@ -99,10 +111,32 @@ function AuthenticatedApp() {
   const isSignedIn = Boolean(session);
   useEffect(() => (isSignedIn ? startPendingWordResolver() : undefined), [isSignedIn]);
 
+  // After a tab switch, start the new tab at the top with focus on its heading
+  const focusTabHeading = useRef(false);
   const handleTabChange = (tab: TabType) => {
+    if (tab !== activeTab) {
+      focusTabHeading.current = true;
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    }
     setActiveTab(tab);
     setVisitedTabs(prev => (prev.has(tab) ? prev : new Set(prev).add(tab)));
   };
+  useEffect(() => {
+    const panel = document.getElementById(`tab-panel-${activeTab}`);
+    if (!focusTabHeading.current || !panel) return;
+    const focusHeading = () => {
+      const heading = panel.querySelector<HTMLElement>('h1');
+      if (!heading) return false;
+      heading.focus({ preventScroll: true });
+      focusTabHeading.current = false;
+      return true;
+    };
+    if (focusHeading()) return;
+    // A tab's first visit renders after its code loads
+    const observer = new MutationObserver(() => { if (focusHeading()) observer.disconnect(); });
+    observer.observe(panel, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [activeTab]);
 
   /**
    * Sign out after a final sync. If changes still haven't reached the cloud,
@@ -145,28 +179,26 @@ function AuthenticatedApp() {
     <div className="min-h-screen bg-slate-900">
       <AccountBar email={session.user.email} onSignOut={handleSignOut} />
       <StorageWarning />
-      <Suspense fallback={<FullScreenMessage>Loading...</FullScreenMessage>}>
-        {visitedTabs.has('trivia') && (
-          <div hidden={activeTab !== 'trivia'}>
-            <TriviaStudy isActive={activeTab === 'trivia'} />
-          </div>
-        )}
-        {visitedTabs.has('vocabulary') && (
-          <div hidden={activeTab !== 'vocabulary'}>
-            <VocabularyStudy isActive={activeTab === 'vocabulary'} autoFocusCapture={openedForCapture} />
-          </div>
-        )}
-        {visitedTabs.has('data-science') && (
-          <div hidden={activeTab !== 'data-science'}>
-            <DataScienceStudy isActive={activeTab === 'data-science'} />
-          </div>
-        )}
-        {visitedTabs.has('analytics') && (
-          <div hidden={activeTab !== 'analytics'}>
-            <Analytics />
-          </div>
-        )}
-      </Suspense>
+      {visitedTabs.has('trivia') && (
+        <TabPanel tab="trivia" activeTab={activeTab}>
+          <TriviaStudy isActive={activeTab === 'trivia'} />
+        </TabPanel>
+      )}
+      {visitedTabs.has('vocabulary') && (
+        <TabPanel tab="vocabulary" activeTab={activeTab}>
+          <VocabularyStudy isActive={activeTab === 'vocabulary'} autoFocusCapture={openedForCapture} />
+        </TabPanel>
+      )}
+      {visitedTabs.has('data-science') && (
+        <TabPanel tab="data-science" activeTab={activeTab}>
+          <DataScienceStudy isActive={activeTab === 'data-science'} />
+        </TabPanel>
+      )}
+      {visitedTabs.has('analytics') && (
+        <TabPanel tab="analytics" activeTab={activeTab}>
+          <Analytics />
+        </TabPanel>
+      )}
       <TabNavigation activeTab={activeTab} onTabChange={handleTabChange} />
     </div>
   );

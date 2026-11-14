@@ -16,6 +16,8 @@ describe('MyFacts', () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: '+ Add a fact' }));
     expect(screen.getByLabelText('Category')).toHaveValue('Probability');
+    // Explains that checking happens when the user runs /check-facts
+    expect(screen.getByText(/run \/check-facts/)).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText(/Question/), { target: { value: 'What is a martingale?' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));

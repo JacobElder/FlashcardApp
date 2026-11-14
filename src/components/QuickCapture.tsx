@@ -29,7 +29,10 @@ export function QuickCapture({ onCapture, autoFocus }: QuickCaptureProps) {
     setMessage(
       added.length === 0
         ? 'Already in your deck.'
-        : `Saved ${added.join(', ')}. ${added.length === 1 ? 'Its definition' : 'Definitions'} will be filled in automatically.`
+        : `Saved ${added.join(', ')}. `
+          + (added.length === 1
+            ? "We'll try to look up its definition automatically. If we can't, it'll be marked “needs definition”."
+            : "We'll try to look up definitions automatically. Any we can't find will be marked “needs definition”.")
         + (skipped > 0 ? ` (${skipped} already in your deck.)` : '')
     );
     setText('');
@@ -57,7 +60,7 @@ export function QuickCapture({ onCapture, autoFocus }: QuickCaptureProps) {
         <button
           type="submit"
           disabled={!text.trim()}
-          className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg font-medium transition-colors"
+          className="min-h-11 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg font-medium transition-colors"
         >
           Save
         </button>

@@ -22,7 +22,7 @@ export function MyWordsList({ words, onEdit, onDelete }: MyWordsListProps) {
   return (
     <ul className="max-w-md mx-auto px-4 py-3 space-y-2 border-b border-slate-800" aria-label="My words">
       {words.map(word => (
-        <li key={word.id} className="flex items-center gap-3 bg-slate-800 rounded-lg px-3 py-2">
+        <li key={word.id} className="flex items-center gap-1 bg-slate-800 rounded-lg pl-3 pr-1 py-1">
           <div className="flex-1 min-w-0">
             <p className="text-white font-medium truncate">{word.word}</p>
             <p className="text-slate-400 text-xs truncate">{word.definition}</p>
@@ -32,14 +32,14 @@ export function MyWordsList({ words, onEdit, onDelete }: MyWordsListProps) {
               <button
                 type="button"
                 onClick={() => { onDelete(word); setConfirmingId(null); }}
-                className="text-xs font-medium text-white bg-red-600 hover:bg-red-500 px-2 py-1 rounded"
+                className="min-h-11 text-sm font-medium text-white bg-red-600 hover:bg-red-500 px-3 rounded"
               >
                 Delete
               </button>
               <button
                 type="button"
                 onClick={() => setConfirmingId(null)}
-                className="text-xs text-slate-300 hover:text-white px-2 py-1"
+                className="min-h-11 text-sm text-slate-300 hover:text-white px-3"
               >
                 Cancel
               </button>
@@ -49,7 +49,7 @@ export function MyWordsList({ words, onEdit, onDelete }: MyWordsListProps) {
               <button
                 type="button"
                 onClick={() => onEdit(word)}
-                className="text-xs text-blue-400 hover:text-blue-300 px-2 py-1"
+                className="min-h-11 text-sm text-blue-400 hover:text-blue-300 px-3"
                 aria-label={`Edit ${word.word}`}
               >
                 Edit
@@ -57,7 +57,7 @@ export function MyWordsList({ words, onEdit, onDelete }: MyWordsListProps) {
               <button
                 type="button"
                 onClick={() => setConfirmingId(word.id)}
-                className="text-xs text-red-400 hover:text-red-300 px-2 py-1"
+                className="min-h-11 text-sm text-red-400 hover:text-red-300 px-3"
                 aria-label={`Delete ${word.word}`}
               >
                 Delete

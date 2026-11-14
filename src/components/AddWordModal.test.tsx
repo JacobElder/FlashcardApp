@@ -25,6 +25,19 @@ describe('AddWordModal', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it('closes on a backdrop click only while nothing has been typed', () => {
+    const { onClose } = setup({ initialWord: 'zeal' });
+    const backdrop = screen.getByRole('dialog').previousElementSibling!;
+    fireEvent.change(screen.getByLabelText(/^Definition/), { target: { value: 'fervor' } });
+    fireEvent.click(backdrop);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(/^Definition/)).toHaveValue('fervor');
+
+    fireEvent.change(screen.getByLabelText(/^Definition/), { target: { value: '' } });
+    fireEvent.click(backdrop);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects a word already in the deck', () => {
     const { onSave } = setup();
     fireEvent.change(screen.getByLabelText(/^Word/), { target: { value: 'Ubiquitous' } });
