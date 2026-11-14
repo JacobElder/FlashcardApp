@@ -1,12 +1,14 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   MAX_ABILITY,
   MIN_ABILITY,
+  PRIOR_INFO,
   initialAbilityInfo,
   reviewDateFor,
   buildDifficultyPriors,
   calculateInformation,
   calculateProbability,
+  chooseFormat,
   getItemParams,
   isDue,
   migrateProfile,
@@ -14,7 +16,8 @@ import {
   updateAbility,
   updateItemDifficulty,
 } from './irt';
-import type { FlashCard } from '../types';
+import type { FlashCard, IRTCardHistory } from '../types';
+import { triviaCards } from '../data/triviaCards';
 
 const card = (id: string, extra: Partial<FlashCard> = {}): FlashCard => ({
   id, type: 'trivia', front: id, back: id, ...extra,
@@ -41,6 +44,16 @@ describe('probability and information', () => {
 
 describe('updateAbility', () => {
   const item = { difficulty: 0, discrimination: 1, guessing: 0 };
+
+  it('shrinks the first answers toward the N(0, 1) prior mean', () => {
+    // Without a prior the first step would be score / item info = 0.5 / 0.25 = 2
+    const first = updateAbility({ ability: 0, info: PRIOR_INFO }, item, true);
+    expect(first.ability).toBeCloseTo(0.5 / (PRIOR_INFO + 0.25));
+    // Ten straight correct answers on average items stay well inside the range
+    let estimate = { ability: 0, info: PRIOR_INFO };
+    for (let i = 0; i < 10; i++) estimate = updateAbility(estimate, item, true);
+    expect(estimate.ability).toBeLessThan(2.5);
+  });
 
   it('moves up on a correct answer and down on a miss', () => {
     expect(updateAbility({ ability: 0, info: 1 }, item, true).ability).toBeGreaterThan(0);
@@ -108,6 +121,32 @@ describe('getItemParams', () => {
 
 describe('scheduling', () => {
   const now = new Date('2026-01-10T12:00:00Z').getTime();
+
+  it('serves due reviews before new cards, even more informative new ones', () => {
+    const history = { review: { cardId: 'review', timesAnswered: 3, timesCorrect: 1, nextReviewDate: '2026-01-10T00:00:00Z', estDifficulty: 3.5 } };
+    const cards = [card('new1', { difficulty: 0 }), card('review'), card('new2', { difficulty: 0 })];
+    for (let i = 0; i < 20; i++) expect(selectNextCard(0, cards, history, {}, now)?.card.id).toBe('review');
+  });
+
+  it('orders due reviews by whole days overdue, then by information', () => {
+    const history = {
+      older: { cardId: 'older', timesAnswered: 1, timesCorrect: 1, nextReviewDate: '2026-01-05T00:00:00Z', estDifficulty: 3 },
+      sameDayA: { cardId: 'sameDayA', timesAnswered: 1, timesCorrect: 1, nextReviewDate: '2026-01-10T00:00:00Z', estDifficulty: 3 },
+      sameDayB: { cardId: 'sameDayB', timesAnswered: 1, timesCorrect: 1, nextReviewDate: '2026-01-10T06:00:00Z', estDifficulty: 0 },
+    };
+    const ids = ['sameDayA', 'sameDayB', 'older'];
+    expect(selectNextCard(0, ids.map(id => card(id)), history, {}, now)?.card.id).toBe('older');
+    expect(selectNextCard(0, ids.slice(0, 2).map(id => card(id)), history, {}, now)?.card.id).toBe('sameDayB');
+  });
+
+  it('offers not-yet-due cards (studying ahead) soonest first, after new cards', () => {
+    const history = {
+      soon: { cardId: 'soon', timesAnswered: 1, timesCorrect: 1, nextReviewDate: '2026-01-11T00:00:00Z' },
+      later: { cardId: 'later', timesAnswered: 1, timesCorrect: 1, nextReviewDate: '2026-01-20T00:00:00Z' },
+    };
+    expect(selectNextCard(0, [card('later'), card('soon')], history, {}, now)?.card.id).toBe('soon');
+    expect(selectNextCard(0, [card('later'), card('soon'), card('new')], history, {}, now)?.card.id).toBe('new');
+  });
 
   it('treats new and past-due cards as due', () => {
     expect(isDue(undefined, now)).toBe(true);
@@ -194,6 +233,13 @@ describe('IRT robustness', () => {
     })).toBeCloseTo(2);
     expect(initialAbilityInfo({ ability: 0, abilityInfo: 7, cardHistory: {} })).toBe(7);
   });
+
+  it('counts MC answers toward the starting information of a legacy profile', () => {
+    expect(initialAbilityInfo({
+      ability: 0,
+      cardHistory: { a: { cardId: 'a', timesAnswered: 0, timesCorrect: 0, mcTimesAnswered: 10, mcTimesCorrect: 8 } },
+    })).toBeCloseTo(2);
+  });
 });
 
 describe('scheduling dates', () => {
@@ -214,10 +260,31 @@ describe('scheduling dates', () => {
 });
 
 describe('format selection', () => {
-  it('prefers MC when open recall is far too hard for the user', () => {
-    vi.spyOn(Math, 'random').mockReturnValue(0);
-    const card = { id: 'a', type: 'trivia' as const, front: 'Q', back: 'A', options: ['x', 'y', 'z'], difficulty: 4, mcDifficulty: -1 };
-    expect(selectNextCard(-1, [card], {})?.format).toBe('mc');
+  const opts = { options: ['x', 'y', 'z'] };
+  const seen = (extra: Partial<IRTCardHistory> = {}): IRTCardHistory =>
+    ({ cardId: 'a', timesAnswered: 2, timesCorrect: 2, leitnerBox: 1, correctStreak: 2, ...extra });
+
+  it('shows a new card with options as MC', () => {
+    expect(chooseFormat(0, card('a', opts), undefined)).toBe('mc');
+  });
+
+  it('shows MC after a miss, and open recall once it is answered correctly', () => {
+    expect(chooseFormat(0, card('a', opts), seen({ correctStreak: 0 }))).toBe('mc');
+    expect(chooseFormat(0, card('a', opts), seen())).toBe('open');
+  });
+
+  it('shows MC while open recall is unlikely, below the MC box cap', () => {
+    const hard = card('a', { ...opts, difficulty: 1.5 }); // P(open) at ability 0 is ~0.18
+    expect(chooseFormat(0, hard, seen())).toBe('mc');
+    expect(chooseFormat(0, hard, seen({ leitnerBox: 2 }))).toBe('open');
+    expect(chooseFormat(2, hard, seen())).toBe('open');
+  });
+
+  it('selects MC for real trivia cards, which have no authored MC parameters', () => {
+    const deck = triviaCards.filter(c => c.options?.length).slice(0, 50);
+    expect(deck.length).toBe(50);
+    expect(selectNextCard(0, deck, {})?.format).toBe('mc');
+    expect(chooseFormat(MAX_ABILITY, deck[0], seen({ cardId: deck[0].id }))).toBe('open');
   });
 
   it('always uses open recall for a card without options', () => {

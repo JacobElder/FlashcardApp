@@ -47,6 +47,25 @@ export interface IRTCardHistory {
   mcTimesCorrect?: number;
   /** Correct answers in a row (either format); a miss resets it. Lets trouble cards graduate. */
   correctStreak?: number;
+  /**
+   * The answer counts above split by the device that recorded them, so a sync
+   * can add up answers made on different devices instead of keeping one copy.
+   * Answers not listed here (recorded before this existed) are "legacy":
+   * the count minus the sum of its devices.
+   */
+  byDevice?: Record<string, DeviceCardCounts>;
+}
+
+/** One device's share of a card's answer counts (zeros omitted). */
+export interface DeviceCardCounts {
+  /** timesAnswered */
+  n?: number;
+  /** timesCorrect */
+  c?: number;
+  /** mcTimesAnswered */
+  mn?: number;
+  /** mcTimesCorrect */
+  mc?: number;
 }
 
 export interface IRTProfile {
@@ -58,8 +77,12 @@ export interface IRTProfile {
   updatedAt?: string;
 }
 
-// Rating values for SM-2
-export type Rating = 0 | 1 | 2 | 3 | 4 | 5;
+/**
+ * Self-graded answer quality: again (0), hard (2), good (4), easy (5).
+ * Anything from hard up counts as correct for IRT; the Leitner box move
+ * depends on which of the four it is (see nextBox in useAdaptiveTesting).
+ */
+export type Rating = 0 | 2 | 4 | 5;
 
 // Named ratings for UI
 export type RatingName = 'again' | 'hard' | 'good' | 'easy';

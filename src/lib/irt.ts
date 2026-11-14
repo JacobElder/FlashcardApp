@@ -7,14 +7,26 @@ import type { CardFormat, FlashCard, IRTCardHistory, IRTProfile } from '../types
 
 export const MIN_ABILITY = -4;
 export const MAX_ABILITY = 4;
-/** Information contributed by the N(0, 1) prior on ability. */
-const PRIOR_INFO = 1;
+/**
+ * Precision of the N(0, 1) prior on ability. The prior enters the recursive
+ * (Laplace) update as its starting point: a fresh profile starts at the prior
+ * mean 0 with this much information, so the first answers are shrunk toward
+ * 0. Each later Newton step works on the running Gaussian approximation of the
+ * posterior, which already contains the prior, so it is not re-added per
+ * answer (that would count it once per answer instead of once).
+ */
+export const PRIOR_INFO = 1;
 /** Floor on the ability step so the estimate can still track real learning. */
 const MIN_ABILITY_STEP = 0.05;
 /** How far an MC card's difficulty sits below its open-recall difficulty when not authored. */
 const MC_DIFFICULTY_OFFSET = 0.5;
 /** Recognition (MC) alone can't schedule a card further out than this Leitner box. */
 export const MC_BOX_CAP = 2;
+/** Below this chance of open recall (at the current ability), a card with options is shown as MC. */
+export const MC_RECALL_THRESHOLD = 0.35;
+/** Rough information per past answer, for profiles saved before `abilityInfo` existed. */
+const LEGACY_INFO_PER_OPEN_ANSWER = 0.2;
+const LEGACY_INFO_PER_MC_ANSWER = 0.1;
 /** Review interval in days for each Leitner box. */
 export const BOX_INTERVAL_DAYS = [0, 1, 3, 7, 14, 30];
 export const MAX_BOX = BOX_INTERVAL_DAYS.length - 1;
@@ -64,8 +76,13 @@ export interface AbilityEstimate {
 /** Starting information for a profile saved before `abilityInfo` was tracked. */
 export function initialAbilityInfo(profile: IRTProfile): number {
   if (profile.abilityInfo !== undefined) return profile.abilityInfo;
-  const answered = Object.values(profile.cardHistory).reduce((n, h) => n + h.timesAnswered, 0);
-  return PRIOR_INFO + 0.2 * answered;
+  // MC answers carry less information (guessing floor, lower discrimination)
+  return Object.values(profile.cardHistory).reduce(
+    (info, h) => info
+      + LEGACY_INFO_PER_OPEN_ANSWER * (h.timesAnswered ?? 0)
+      + LEGACY_INFO_PER_MC_ANSWER * (h.mcTimesAnswered ?? 0),
+    PRIOR_INFO
+  );
 }
 
 /**
@@ -160,21 +177,41 @@ export function isDue(history: IRTCardHistory | undefined, now: number): boolean
   return new Date(history.nextReviewDate).getTime() <= now;
 }
 
-/**
- * Scheduling weight: overdue reviews first, then new cards; cards that aren't
- * due yet (only offered when studying ahead) are heavily discounted.
- */
-function scheduleMultiplier(history: IRTCardHistory | undefined, now: number): number {
-  if (!history?.nextReviewDate) return 1.0;
-  const nextReview = new Date(history.nextReviewDate).getTime();
-  if (now < nextReview) return 0.1;
-  const daysOverdue = (now - nextReview) / (1000 * 60 * 60 * 24);
-  return Math.min(3.0, 1.5 + daysOverdue * 0.1);
+const DAY_MS = 1000 * 60 * 60 * 24;
+
+/** Total answers in either format. */
+export function answerCount(history: IRTCardHistory | undefined): number {
+  return (history?.timesAnswered ?? 0) + (history?.mcTimesAnswered ?? 0);
 }
 
 /**
- * Select the best next card and format: maximum information at the current
- * ability, weighted by how due the card is.
+ * Which format to show a card in. A card with options is shown as multiple
+ * choice while it's being learned: when it's new, when its last answer was a
+ * miss, or (below the MC box cap) when open recall is unlikely at the current
+ * ability. Otherwise, and always for cards without options, open recall.
+ */
+export function chooseFormat(
+  userAbility: number,
+  card: FlashCard,
+  history: IRTCardHistory | undefined,
+  priors: Record<string, number> = {}
+): CardFormat {
+  if (!card.options?.length) return 'open';
+  if (answerCount(history) === 0) return 'mc';
+  if (history?.correctStreak === 0) return 'mc';
+  if ((history?.leitnerBox ?? 0) >= MC_BOX_CAP) return 'open';
+  const open = getItemParams(card, history, 'open', priors);
+  const pOpen = calculateProbability(userAbility, open.difficulty, open.discrimination, open.guessing);
+  return pOpen < MC_RECALL_THRESHOLD ? 'mc' : 'open';
+}
+
+/**
+ * Select the next card and its format, in priority order:
+ * 1. Due reviews (cards with a review date that has passed): most overdue
+ *    whole days first, information at the current ability as tiebreak.
+ * 2. New cards (never scheduled), by information.
+ * 3. Cards not yet due (only passed in when studying ahead or drilling):
+ *    soonest due first, information as tiebreak.
  */
 export function selectNextCard(
   userAbility: number,
@@ -185,28 +222,35 @@ export function selectNextCard(
 ): { card: FlashCard; format: CardFormat } | null {
   if (availableCards.length === 0) return null;
 
-  let best: { card: FlashCard; format: CardFormat } = { card: availableCards[0], format: 'open' };
-  let maxScore = -1;
-
+  let best: { card: FlashCard; key: [number, number, number] } | null = null;
   for (const card of availableCards) {
     const history = cardHistory[card.id];
-    const multiplier = scheduleMultiplier(history, now);
-    const formats: CardFormat[] = card.options?.length ? ['open', 'mc'] : ['open'];
+    const format = chooseFormat(userAbility, card, history, priors);
+    const { difficulty, discrimination, guessing } = getItemParams(card, history, format, priors);
+    // Small random noise breaks ties between otherwise identical cards
+    const info = calculateInformation(userAbility, difficulty, discrimination, guessing) + Math.random() * 0.001;
 
-    for (const format of formats) {
-      const { difficulty, discrimination, guessing } = getItemParams(card, history, format, priors);
-      // Small random noise breaks ties between otherwise identical cards
-      const score =
-        calculateInformation(userAbility, difficulty, discrimination, guessing) * multiplier +
-        Math.random() * 0.001;
-      if (score > maxScore) {
-        maxScore = score;
-        best = { card, format };
-      }
+    let key: [number, number, number];
+    if (!history?.nextReviewDate) {
+      key = [1, 0, info];
+    } else {
+      const reviewAt = new Date(history.nextReviewDate).getTime();
+      key = reviewAt <= now
+        ? [2, Math.floor((now - reviewAt) / DAY_MS), info]
+        : [0, -(reviewAt - now), info];
     }
+    if (!best || compareKeys(key, best.key) > 0) best = { card, key };
   }
 
-  return best;
+  const card = best!.card;
+  return { card, format: chooseFormat(userAbility, card, cardHistory[card.id], priors) };
+}
+
+function compareKeys(a: number[], b: number[]): number {
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return 0;
 }
 
 /** An MC-only card's review date, pulled in to no later than the MC box cap allows. */

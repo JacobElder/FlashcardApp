@@ -3,15 +3,25 @@ import {
   STORAGE_KEYS,
   SYNCED_KEYS,
   EMPTY_STUDY_STATS,
+  backupLocalData,
   clearAllData,
+  restoreLocalBackup,
   getFromStorage,
   getStorageOwner,
   setStorageOwner,
   setToStorage,
   subscribeToStorage,
+  type CountsByDevice,
   type StudyStats,
 } from './storage';
-import { mergeCounts, mergeProfiles, mergeStats, mergeVocabulary } from './merge';
+import {
+  COUNTS_BY_DEVICE_FIELD,
+  carryOverHistory,
+  mergeCounts,
+  mergeProfiles,
+  mergeStats,
+  mergeVocabularyWithAliases,
+} from './merge';
 import { mergeFacts } from './facts';
 import type { IRTProfile, UserFacts, UserVocabulary } from '../types';
 
@@ -30,7 +40,8 @@ interface ProgressRow {
   user_facts?: UserFacts;
   study_stats: StudyStats;
   user_vocabulary: UserVocabulary;
-  incorrect_counts: Record<string, number>;
+  /** Flat { cardId: n } plus the per-device breakdown under COUNTS_BY_DEVICE_FIELD. */
+  incorrect_counts: Record<string, number | CountsByDevice>;
 }
 
 interface RemoteRow extends Partial<ProgressRow> {
@@ -45,6 +56,7 @@ interface LocalSnapshot {
   stats: StudyStats | undefined;
   userVocabulary: UserVocabulary | undefined;
   incorrectCounts: Record<string, number> | undefined;
+  incorrectCountsByDevice: CountsByDevice | undefined;
 }
 
 let userId: string | null = null;
@@ -60,18 +72,44 @@ const hasColumn = (column: OptionalColumn) => !missingColumns.has(column);
 // Serializes syncs so two never race for the same row
 let queue: Promise<void> = Promise.resolve();
 
+export interface SyncStatusSnapshot {
+  status: SyncStatus;
+  error: string | null;
+  /** Optional cloud columns the database lacks, so that data stays on this device only. */
+  missingColumns: readonly string[];
+}
+
+const NO_COLUMNS: readonly string[] = [];
+
 // Replaced (never mutated) on change, so it can back useSyncExternalStore
-let statusSnapshot: { status: SyncStatus; error: string | null } = { status: 'idle', error: null };
+let statusSnapshot: SyncStatusSnapshot = { status: 'idle', error: null, missingColumns: NO_COLUMNS };
 const statusListeners = new Set<() => void>();
 
 function setStatus(status: SyncStatus, error: string | null = null) {
-  if (status === statusSnapshot.status && error === statusSnapshot.error) return;
-  statusSnapshot = { status, error };
+  const missing = missingColumns.size === 0 ? NO_COLUMNS : [...missingColumns].sort();
+  if (
+    status === statusSnapshot.status &&
+    error === statusSnapshot.error &&
+    missing.join() === statusSnapshot.missingColumns.join()
+  ) return;
+  statusSnapshot = { status, error, missingColumns: missing };
   statusListeners.forEach(listener => listener());
 }
 
-export function getSyncStatus(): { status: SyncStatus; error: string | null } {
+export function getSyncStatus(): SyncStatusSnapshot {
   return statusSnapshot;
+}
+
+/**
+ * JSON with object keys sorted, so two values that differ only in key order
+ * (e.g. Postgres JSONB, which reorders keys) compare equal.
+ */
+export function stableStringify(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) =>
+    v && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : v
+  );
 }
 
 export function subscribeToSyncStatus(listener: () => void): () => void {
@@ -93,12 +131,13 @@ function readLocal(): LocalSnapshot {
     stats: getFromStorage<StudyStats | undefined>(STORAGE_KEYS.STUDY_STATS, undefined),
     userVocabulary: getFromStorage<UserVocabulary | undefined>(STORAGE_KEYS.USER_VOCABULARY, undefined),
     incorrectCounts: getFromStorage<Record<string, number> | undefined>(STORAGE_KEYS.INCORRECT_COUNTS, undefined),
+    incorrectCountsByDevice: getFromStorage<CountsByDevice | undefined>(STORAGE_KEYS.INCORRECT_COUNTS_BY_DEVICE, undefined),
   };
 }
 
 function writeIfChanged<T>(key: string, value: T) {
   const current = getFromStorage<T | undefined>(key, undefined);
-  if (JSON.stringify(current) !== JSON.stringify(value)) {
+  if (stableStringify(current) !== stableStringify(value)) {
     // 'remote' so the write isn't echoed back to the cloud as a new change
     setToStorage(key, value, 'remote');
   }
@@ -110,7 +149,9 @@ function toRow(local: LocalSnapshot): ProgressRow {
     vocabulary_profile: local.vocabulary ?? { ability: 0, cardHistory: {} },
     study_stats: local.stats ?? EMPTY_STUDY_STATS,
     user_vocabulary: local.userVocabulary ?? { words: [], deletedIds: [], lastUpdated: '' },
-    incorrect_counts: local.incorrectCounts ?? {},
+    incorrect_counts: local.incorrectCountsByDevice
+      ? { ...local.incorrectCounts, [COUNTS_BY_DEVICE_FIELD]: local.incorrectCountsByDevice }
+      : local.incorrectCounts ?? {},
   };
   if (hasColumn('data_science_profile')) row.data_science_profile = local.dataScience ?? { ability: 0, cardHistory: {} };
   if (hasColumn('user_facts')) row.user_facts = local.userFacts ?? { facts: [], deletedIds: [], lastUpdated: '' };
@@ -150,15 +191,25 @@ async function syncOnce(uid: string): Promise<SyncAttempt> {
 
   // Read local data after the download, with no await in between, so no local write is missed
   const local = readLocal();
+  const vocab = mergeVocabularyWithAliases(local.userVocabulary, data?.user_vocabulary);
+  const { [COUNTS_BY_DEVICE_FIELD]: remoteByDevice, ...remoteCounts } = (data?.incorrect_counts ?? {}) as Record<string, unknown>;
+  const counts = mergeCounts(
+    local.incorrectCounts,
+    remoteCounts as Record<string, number>,
+    local.incorrectCountsByDevice,
+    remoteByDevice as CountsByDevice | undefined
+  );
   const merged: LocalSnapshot = {
     trivia: mergeProfiles(local.trivia, data?.trivia_profile),
-    vocabulary: mergeProfiles(local.vocabulary, data?.vocabulary_profile),
+    // A duplicate word collapsed into another keeps its study history under the surviving id
+    vocabulary: carryOverHistory(mergeProfiles(local.vocabulary, data?.vocabulary_profile), vocab.replaced),
     // Without the column there's no cloud copy to merge, so keep the local one as is
     dataScience: hasColumn('data_science_profile') ? mergeProfiles(local.dataScience, data?.data_science_profile) : local.dataScience,
     userFacts: hasColumn('user_facts') ? mergeFacts(local.userFacts, data?.user_facts) : local.userFacts,
     stats: mergeStats(local.stats, data?.study_stats),
-    userVocabulary: mergeVocabulary(local.userVocabulary, data?.user_vocabulary),
-    incorrectCounts: mergeCounts(local.incorrectCounts, data?.incorrect_counts),
+    userVocabulary: vocab.vocabulary,
+    incorrectCounts: counts.counts,
+    incorrectCountsByDevice: counts.byDevice,
   };
 
   writeIfChanged(STORAGE_KEYS.TRIVIA_PROGRESS, merged.trivia);
@@ -168,12 +219,13 @@ async function syncOnce(uid: string): Promise<SyncAttempt> {
   writeIfChanged(STORAGE_KEYS.STUDY_STATS, merged.stats);
   writeIfChanged(STORAGE_KEYS.USER_VOCABULARY, merged.userVocabulary);
   writeIfChanged(STORAGE_KEYS.INCORRECT_COUNTS, merged.incorrectCounts);
+  if (merged.incorrectCountsByDevice) writeIfChanged(STORAGE_KEYS.INCORRECT_COUNTS_BY_DEVICE, merged.incorrectCountsByDevice);
 
   // The merge already contains everything local, so if it equals the cloud there's nothing to send
   const mergedRow = toRow(merged);
   const cloudIsCurrent = data != null &&
     (Object.keys(mergedRow) as (keyof ProgressRow)[]).every(
-      column => JSON.stringify(mergedRow[column]) === JSON.stringify(data[column])
+      column => stableStringify(mergedRow[column]) === stableStringify(data[column])
     );
   if (cloudIsCurrent) return 'done';
 
@@ -209,6 +261,7 @@ async function syncOnce(uid: string): Promise<SyncAttempt> {
 function dropColumn(column: OptionalColumn): SyncAttempt {
   console.warn(`The user_progress table has no ${column} column; run supabase_schema.sql to sync it.`);
   missingColumns.add(column);
+  setStatus(statusSnapshot.status, statusSnapshot.error);
   return 'retry';
 }
 
@@ -252,8 +305,8 @@ async function sync(): Promise<void> {
 }
 
 /**
- * Begin syncing for a signed-in user: claims local data for them (clearing it
- * if it belonged to someone else), merges with the cloud copy, and pushes
+ * Begin syncing for a signed-in user: claims local data for them (backing it
+ * up and clearing it if it belonged to someone else), merges with the cloud copy, and pushes
  * subsequent local changes.
  */
 export function startSync(uid: string): Promise<void> {
@@ -264,19 +317,33 @@ export function startSync(uid: string): Promise<void> {
 }
 
 /**
- * Mark local data as belonging to `uid`, first clearing it if it belonged to a
- * different account. Synchronous, so it can run before any page reads storage.
+ * Mark local data as belonging to `uid`. Data belonging to a different account
+ * is moved to that account's backup (never silently deleted), and a backup
+ * left by `uid` on an earlier switch is restored, then merged by the sync.
+ * Synchronous, so it can run before any page reads storage.
  */
 export function claimLocalData(uid: string): void {
   const owner = getStorageOwner();
-  if (owner && owner !== uid) clearAllData();
-  if (owner !== uid) setStorageOwner(uid);
+  if (owner === uid) return;
+  if (owner) {
+    backupLocalData(owner);
+    clearAllData();
+  }
+  restoreLocalBackup(uid);
+  setStorageOwner(uid);
 }
 
 /** True if local changes may not have reached the cloud yet. */
 export function hasUnsyncedChanges(): boolean {
   const { status } = statusSnapshot;
   return dirty || status === 'error' || status === 'offline' || status === 'syncing';
+}
+
+/** Run a sync now, whether or not anything changed (e.g. the Retry button). */
+export function syncNow(): Promise<void> {
+  clearTimeout(pushTimer);
+  if (!userId) return queue;
+  return enqueue(sync);
 }
 
 /** Push any pending changes now (e.g. before signing out or when the page is hidden). */

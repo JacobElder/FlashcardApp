@@ -104,23 +104,29 @@ function AuthenticatedApp() {
     setVisitedTabs(prev => (prev.has(tab) ? prev : new Set(prev).add(tab)));
   };
 
-  const handleSignOut = async () => {
-    let canClear = false;
+  /**
+   * Sign out after a final sync. If changes still haven't reached the cloud,
+   * returns false without signing out unless `force` (the user confirmed).
+   */
+  const handleSignOut = async (force: boolean): Promise<boolean> => {
+    let synced = false;
     try {
       await flushPush();
-      // Keep unsynced progress on this device; it's tagged with its owner and
-      // cleared automatically if a different account signs in.
-      canClear = !hasUnsyncedChanges();
+      synced = !hasUnsyncedChanges();
     } catch (error) {
       console.error('Final sync before sign-out failed:', error);
     }
+    if (!synced && !force) return false;
     try {
       await getSupabase().auth.signOut();
     } catch (error) {
       console.error('Sign-out request failed:', error);
     }
     stopSync();
-    if (canClear) clearAllData();
+    // Unsynced progress stays on this device, tagged with its owner: it syncs
+    // on their next sign-in, or is backed up if a different account signs in.
+    if (synced) clearAllData();
+    return true;
   };
 
   if (isLoading) {
@@ -137,7 +143,7 @@ function AuthenticatedApp() {
 
   return (
     <div className="min-h-screen bg-slate-900">
-      <AccountBar email={session.user.email} onSignOut={() => void handleSignOut()} />
+      <AccountBar email={session.user.email} onSignOut={handleSignOut} />
       <StorageWarning />
       <Suspense fallback={<FullScreenMessage>Loading...</FullScreenMessage>}>
         {visitedTabs.has('trivia') && (

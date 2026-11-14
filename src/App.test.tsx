@@ -98,6 +98,27 @@ describe('App', () => {
     await vi.waitFor(() => expect(getFromStorage(STORAGE_KEYS.INCORRECT_COUNTS, null)).toBeNull());
   });
 
+  it('asks before signing out with unsynced changes, and keeps them on this device', async () => {
+    mock().auth.signOut.mockClear();
+    await renderSignedIn();
+    await screen.findByRole('heading', { name: 'Trivia Study' });
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    setToStorage(STORAGE_KEYS.INCORRECT_COUNTS, { a: 1 });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign Out' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Unsynced changes' });
+    expect(mock().auth.signOut).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Stay signed in' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign Out' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign out anyway' }));
+    await vi.waitFor(() => expect(mock().auth.signOut).toHaveBeenCalled());
+    expect(getFromStorage(STORAGE_KEYS.INCORRECT_COUNTS, null)).toEqual({ a: 1 });
+    vi.restoreAllMocks();
+  });
+
   it('still finishes signing out when the sign-out request fails', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     mock().auth.signOut.mockRejectedValueOnce(new Error('offline'));
