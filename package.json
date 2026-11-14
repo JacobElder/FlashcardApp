@@ -16,7 +16,8 @@
     "words:pending": "node --env-file=.env.local scripts/pending-words.mjs list",
     "words:apply": "node --env-file=.env.local scripts/pending-words.mjs apply",
     "facts:pending": "node --env-file=.env.local scripts/pending-facts.mjs list",
-    "facts:apply": "node --env-file=.env.local scripts/pending-facts.mjs apply"
+    "facts:apply": "node --env-file=.env.local scripts/pending-facts.mjs apply",
+    "auth:login": "node --env-file=.env.local scripts/supabaseAuth.mjs login"
   },
   "repository": {
     "type": "git",
