@@ -58,18 +58,15 @@ test('signs in, studies a card, syncs it to the cloud, and signs out', async ({ 
   // First sync: nothing in the cloud yet, so the row is created
   await expect.poll(() => cloud.writes).toBe(1);
 
-  // The real deck may lead with multiple choice; skip to an open-recall card
-  const showAnswer = page.getByRole('button', { name: 'Show answer' });
-  for (let i = 0; i < 20 && !(await showAnswer.isVisible()); i++) {
-    await page.getByRole('button', { name: 'Skip' }).click();
-  }
-  await showAnswer.click();
+  // New trivia cards open as multiple choice; vocabulary cards are always open recall
+  await page.getByRole('button', { name: 'Vocabulary' }).click();
+  await page.getByRole('button', { name: 'Show answer' }).click();
   await page.getByRole('button', { name: /^Good:/ }).click();
-  await expect(page.getByText('✓ 1')).toBeVisible();
+  await expect(page.getByText(/✓ 1|Correct: 1/)).toBeVisible();
 
   // The answer reaches the cloud after the push debounce
   await expect.poll(
-    () => Object.keys((cloud.row?.trivia_profile as { cardHistory?: object } | undefined)?.cardHistory ?? {}).length,
+    () => Object.keys((cloud.row?.vocabulary_profile as { cardHistory?: object } | undefined)?.cardHistory ?? {}).length,
     { timeout: 10_000 }
   ).toBe(1);
 
