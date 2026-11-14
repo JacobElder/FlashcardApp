@@ -104,3 +104,44 @@ test('long card text stays inside the card on a phone-width screen', async ({ pa
     await page.getByRole('button', { name: 'Skip' }).click();
   }
 });
+
+test('rating buttons are fully on screen above the tab bar after flipping, on a phone', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await fakeSupabase(page);
+  await page.goto('./');
+  await page.getByLabel('Email').fill(USER.email);
+  await page.getByLabel('Password').fill('correct-horse');
+  await page.getByRole('button', { name: 'Sign In', exact: true }).click();
+
+  const nav = page.getByRole('navigation', { name: 'Study sections' });
+  for (const tab of ['Trivia', 'Vocabulary']) {
+    await nav.getByRole('button', { name: tab }).click();
+    const panel = page.locator(`#tab-panel-${tab.toLowerCase()}`);
+    const showAnswer = panel.getByRole('button', { name: 'Show answer' });
+    await expect(panel.getByRole('button', { name: /Skip/ })).toBeVisible();
+    for (let i = 0; i < 20 && !(await showAnswer.isVisible()); i++) {
+      await panel.getByRole('button', { name: /Skip/ }).click();
+    }
+    await showAnswer.click();
+    await page.waitForTimeout(600); // let the flip animation finish
+    const navBox = (await nav.boundingBox())!;
+    for (const name of [/^Again:/, /^Hard:/, /^Good:/, /^Easy:/]) {
+      const box = (await panel.getByRole('button', { name }).boundingBox())!;
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.y + box.height).toBeLessThanOrEqual(navBox.y);
+    }
+    // SCREENSHOT_DIR saves a copy for review outside the test output
+    const dir = process.env.SCREENSHOT_DIR;
+    const file = `ratings-${tab.toLowerCase()}-390x844.png`;
+    await page.screenshot({ path: dir ? `${dir}/${file}` : test.info().outputPath(file) });
+
+    // With the stats expanded the page is taller, and the rating row sticks above the tab bar
+    await panel.getByRole('button', { name: 'Stats' }).click();
+    await expect(panel.getByText('Skill level')).toBeVisible();
+    const good = (await panel.getByRole('button', { name: /^Good:/ }).boundingBox())!;
+    expect(good.y).toBeGreaterThanOrEqual(0);
+    expect(good.y + good.height).toBeLessThanOrEqual(navBox.y);
+    const expanded = `ratings-${tab.toLowerCase()}-stats-open-390x844.png`;
+    await page.screenshot({ path: dir ? `${dir}/${expanded}` : test.info().outputPath(expanded) });
+  }
+});
