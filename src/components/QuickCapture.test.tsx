@@ -13,7 +13,7 @@ describe('QuickCapture', () => {
     render(<QuickCapture onCapture={onCapture} />);
     capture('laconic, sere');
     expect(onCapture).toHaveBeenCalledWith(['laconic', 'sere']);
-    expect(screen.getByRole('status')).toHaveTextContent('Saved laconic, sere. Definitions will be filled in automatically.');
+    expect(screen.getByRole('status')).toHaveTextContent("Saved laconic, sere. We'll try to look up definitions automatically. Any we can't find will be marked “needs definition”.");
     expect(screen.getByLabelText('Capture a word to define later')).toHaveValue('');
   });
 
@@ -26,7 +26,7 @@ describe('QuickCapture', () => {
   it('says how many were skipped when only some were new', () => {
     render(<QuickCapture onCapture={() => ['sere']} />);
     capture('laconic; sere, argot');
-    expect(screen.getByRole('status')).toHaveTextContent('Saved sere. Its definition will be filled in automatically. (2 already in your deck.)');
+    expect(screen.getByRole('status')).toHaveTextContent("Saved sere. We'll try to look up its definition automatically. If we can't, it'll be marked “needs definition”. (2 already in your deck.)");
   });
 
   it('focuses the box when opened from the home-screen shortcut', () => {
