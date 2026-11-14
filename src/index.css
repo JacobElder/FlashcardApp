@@ -11,6 +11,11 @@
   --color-slate-200: #e2e8f0;
 }
 
+:root {
+  /* Dark form controls, scrollbars, and autofill to match the app */
+  color-scheme: dark;
+}
+
 * {
   -webkit-tap-highlight-color: transparent;
 }
@@ -61,6 +66,21 @@ body {
 
 .animate-fade-in {
   animation: fade-in 0.3s ease-out forwards;
+}
+
+/* Respect the OS "reduce motion" setting: no card flip, fades, or smooth scrolling */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* Custom scrollbar */

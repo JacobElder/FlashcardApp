@@ -4,7 +4,7 @@ import { getSupabase } from '../lib/supabase';
 type Mode = 'signIn' | 'signUp' | 'reset';
 
 const MODE_TEXT: Record<Mode, { submit: string; subtitle: string }> = {
-  signIn: { submit: 'Sign In', subtitle: 'Sign in to sync your progress across devices' },
+  signIn: { submit: 'Sign In', subtitle: 'Sign in to study trivia and vocabulary and sync your progress across devices' },
   signUp: { submit: 'Sign Up', subtitle: 'Create an account to sync your progress across devices' },
   reset: { submit: 'Send Reset Link', subtitle: "Enter your email and we'll send you a link to reset your password" },
 };
@@ -71,7 +71,7 @@ export function Auth() {
       <div className="max-w-md w-full bg-slate-800 rounded-xl shadow-xl border border-slate-700 p-8 space-y-6">
         <div className="text-center">
           <h1 className="text-3xl font-bold text-white mb-2">
-            Adaptive Learning
+            Study Deck
           </h1>
           <p className="text-slate-400">{MODE_TEXT[mode].subtitle}</p>
         </div>

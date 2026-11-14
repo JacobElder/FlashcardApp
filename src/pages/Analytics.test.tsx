@@ -18,15 +18,15 @@ describe('Analytics', () => {
       abilityHistory: [{ date: '2026-01-01', ability: 0.1 }, { date: '2026-01-02', ability: 0.5 }],
     });
     render(<Analytics />);
-    expect(screen.getByRole('button', { name: 'Trivia Data' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Trivia' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByText(/Not enough data/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Vocabulary Data' }));
-    expect(screen.getByRole('button', { name: 'Vocabulary Data' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Vocabulary' }));
+    expect(screen.getByRole('button', { name: 'Vocabulary' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('chart')).toHaveTextContent('2 points');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Data Science' }));
-    expect(screen.getByRole('button', { name: 'Data Science' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Data Sci' }));
+    expect(screen.getByRole('button', { name: 'Data Sci' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByText(/Not enough data/)).toBeInTheDocument();
   });
 });

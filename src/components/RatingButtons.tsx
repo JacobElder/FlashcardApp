@@ -69,7 +69,7 @@ export function RatingButtons({ onRate, disabled = false }: RatingButtonsProps) 
       </div>
       <div className="grid grid-cols-4 gap-2 mt-1">
         {ratingOptions.map((option) => (
-          <span key={option.name} className="text-slate-500 text-xs text-center">
+          <span key={option.name} className="text-slate-400 text-xs text-center">
             {option.description}
           </span>
         ))}

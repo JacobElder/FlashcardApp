@@ -78,7 +78,7 @@ test('signs in, studies a card, syncs it to the cloud, and signs out', async ({ 
   await expect(page.getByText(USER.email)).toBeVisible();
 
   await page.getByRole('button', { name: 'Sign Out' }).click();
-  await expect(page.getByRole('heading', { name: 'Adaptive Learning' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Study Deck' })).toBeVisible();
   expect(errors).toEqual([]);
 });
 

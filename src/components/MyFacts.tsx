@@ -18,6 +18,11 @@ const STATUS_LABEL: Record<FactStatus, { text: string; className: string }> = {
   corrected: { text: 'Corrected', className: 'text-orange-300' },
 };
 
+/** How facts get answered and checked: nothing happens until the user asks Claude. */
+const CHECK_HELP =
+  'Claude checks facts when you ask: open this project in Claude Code and run /check-facts. '
+  + 'It looks up answers you left blank and verifies the ones you wrote, then they sync back here.';
+
 const inputClass =
   'w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
 
@@ -44,8 +49,8 @@ export function MyFacts({ deck, facts, categories, defaultCategory }: MyFactsPro
     const fact = addUserFact({ deck, category, question, answer });
     setMessage(
       fact.answer
-        ? 'Saved and added to your deck. Ask Claude to check your facts and it will verify the answer.'
-        : 'Saved. Ask Claude to check your facts and it will look up the answer.'
+        ? 'Saved and added to your deck. Run /check-facts in Claude Code to have Claude verify the answer.'
+        : 'Saved. Run /check-facts in Claude Code to have Claude look up the answer.'
     );
     setQuestion('');
     setAnswer('');
@@ -58,7 +63,7 @@ export function MyFacts({ deck, facts, categories, defaultCategory }: MyFactsPro
           type="button"
           onClick={() => toggle('add')}
           aria-expanded={open === 'add'}
-          className="text-sm px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium"
+          className="min-h-11 text-sm px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium"
         >
           + Add a fact
         </button>
@@ -66,11 +71,17 @@ export function MyFacts({ deck, facts, categories, defaultCategory }: MyFactsPro
           type="button"
           onClick={() => toggle('list')}
           aria-expanded={open === 'list'}
-          className="text-sm px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200"
+          className="min-h-11 text-sm px-3 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200"
         >
           Your facts ({facts.length}{waiting > 0 ? `, ${waiting} waiting` : ''})
         </button>
       </div>
+
+      {open !== 'none' && (
+        <p className="max-w-md mx-auto text-xs text-slate-400 mt-3">
+          {CHECK_HELP}
+        </p>
+      )}
 
       {open === 'add' && (
         <form onSubmit={handleSubmit} className="max-w-md mx-auto mt-3 space-y-2">
@@ -130,7 +141,7 @@ export function MyFacts({ deck, facts, categories, defaultCategory }: MyFactsPro
                       {STATUS_LABEL[fact.status].text} · {fact.category}
                     </p>
                     {fact.originalAnswer && (
-                      <p className="text-slate-500 text-xs mt-0.5">You wrote: {fact.originalAnswer}</p>
+                      <p className="text-slate-400 text-xs mt-0.5">You wrote: {fact.originalAnswer}</p>
                     )}
                     {fact.note && <p className="text-slate-400 text-xs mt-0.5">{fact.note}</p>}
                   </div>
@@ -139,11 +150,11 @@ export function MyFacts({ deck, facts, categories, defaultCategory }: MyFactsPro
                       <button
                         type="button"
                         onClick={() => { deleteUserFact(fact.id); setConfirmingId(null); }}
-                        className="text-xs font-medium text-white bg-red-600 hover:bg-red-500 px-2 py-1 rounded"
+                        className="min-h-11 text-sm font-medium text-white bg-red-600 hover:bg-red-500 px-3 rounded"
                       >
                         Delete
                       </button>
-                      <button type="button" onClick={() => setConfirmingId(null)} className="text-xs text-slate-300 px-2 py-1">
+                      <button type="button" onClick={() => setConfirmingId(null)} className="min-h-11 text-sm text-slate-300 hover:text-white px-3">
                         Cancel
                       </button>
                     </div>
@@ -151,7 +162,7 @@ export function MyFacts({ deck, facts, categories, defaultCategory }: MyFactsPro
                     <button
                       type="button"
                       onClick={() => setConfirmingId(fact.id)}
-                      className="text-xs text-red-400 hover:text-red-300 px-2 py-1 shrink-0"
+                      className="min-h-11 text-sm text-red-400 hover:text-red-300 px-3 shrink-0"
                       aria-label={`Delete fact: ${fact.question}`}
                     >
                       Delete
