@@ -3,12 +3,13 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
-// GitHub Pages serves this repo at https://jacobelder.github.io/FlashcardApp/
-const PAGES_BASE = '/FlashcardApp/'
+// GitHub Pages serves this repo at https://jacobelder.github.io/FlashcardApp/,
+// while Vercel (which sets VERCEL=1 during its builds) serves it from the root.
+const DEPLOY_BASE = process.env.VERCEL ? '/' : '/FlashcardApp/'
 
 export default defineConfig(({ command, isPreview }) => ({
   // `vite preview` serves the built files, whose URLs already include the base
-  base: command === 'build' || isPreview ? PAGES_BASE : '/',
+  base: command === 'build' || isPreview ? DEPLOY_BASE : '/',
   plugins: [
     react(),
     tailwindcss(),
@@ -23,15 +24,15 @@ export default defineConfig(({ command, isPreview }) => ({
         background_color: '#0f172a',
         display: 'standalone',
         orientation: 'portrait',
-        scope: PAGES_BASE,
-        start_url: PAGES_BASE,
+        scope: DEPLOY_BASE,
+        start_url: DEPLOY_BASE,
         // Long-press the home-screen icon to jump straight to word capture
         shortcuts: [
           {
             name: 'Add word',
             short_name: 'Add word',
             description: 'Save a vocabulary word to define later',
-            url: `${PAGES_BASE}?capture`,
+            url: `${DEPLOY_BASE}?capture`,
             icons: [{ src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' }]
           }
         ],
