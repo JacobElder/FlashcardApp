@@ -114,7 +114,9 @@ test('rating buttons are fully on screen above the tab bar after flipping, on a 
   await page.getByRole('button', { name: 'Sign In', exact: true }).click();
 
   const nav = page.getByRole('navigation', { name: 'Study sections' });
-  for (const tab of ['Trivia', 'Vocabulary']) {
+  // Vocabulary cards are always open recall. New trivia cards open as multiple
+  // choice (no rating row), and DeckStudy shares the same StickyRatingBar.
+  for (const tab of ['Vocabulary']) {
     await nav.getByRole('button', { name: tab }).click();
     const panel = page.locator(`#tab-panel-${tab.toLowerCase()}`);
     const showAnswer = panel.getByRole('button', { name: 'Show answer' });
