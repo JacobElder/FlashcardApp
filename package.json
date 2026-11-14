@@ -16,7 +16,8 @@
     "words:pending": "node --env-file=.env.local scripts/pending-words.mjs list",
     "words:apply": "node --env-file=.env.local scripts/pending-words.mjs apply",
     "facts:pending": "node --env-file=.env.local scripts/pending-facts.mjs list",
-    "facts:apply": "node --env-file=.env.local scripts/pending-facts.mjs apply"
+    "facts:apply": "node --env-file=.env.local scripts/pending-facts.mjs apply",
+    "auth:login": "node --env-file=.env.local scripts/supabaseAuth.mjs login"
   },
   "repository": {
     "type": "git",
@@ -46,7 +47,6 @@
     "@tailwindcss/vite": "^4.2.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
-    "@testing-library/user-event": "^14.6.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.4",
@@ -60,7 +60,6 @@
     "typescript-eslint": "^8.71.2",
     "vite": "^7.3.1",
     "vite-plugin-pwa": "^1.2.0",
-    "vitest": "^4.0.18",
-    "workbox-window": "^7.4.0"
+    "vitest": "^4.0.18"
   }
 }

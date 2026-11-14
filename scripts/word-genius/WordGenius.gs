@@ -7,11 +7,13 @@
  * can't parse are queued instead, and the app looks them up in the dictionary.
  *
  * Setup is in scripts/word-genius/README.md. In short: paste this file into a
- * new Apps Script project, set the four Script Properties, run checkRecentEmails
- * to preview, then run installDailyTrigger once.
+ * new Apps Script project, set the Script Properties (SUPABASE_URL,
+ * SUPABASE_ANON_KEY and, preferably, FLASHCARD_REFRESH_TOKEN), run
+ * checkRecentEmails to preview, then run installDailyTrigger once.
  *
- * The pure functions at the top (no Google or network calls) are unit tested in
- * WordGenius.test.mjs; keep them free of Apps Script services.
+ * The pure functions at the top (no Google services; network calls only via a
+ * function passed in) are unit tested in WordGenius.test.mjs; keep them free of
+ * Apps Script services.
  */
 
 var SEARCH_QUERY = 'from:mail@wordgenius.com subject:"Word of the Day" -label:flashcards-added newer_than:30d';
@@ -123,6 +125,35 @@ function addWordsToVocabulary(vocab, entries, now) {
   return { vocabulary: next, added: added, skipped: skipped };
 }
 
+/**
+ * Get a Supabase session. Prefers c.FLASHCARD_REFRESH_TOKEN: Supabase rotates it
+ * on every use, so the new one goes to saveRefreshToken straight away (the old
+ * one stops working). Falls back to email + password if there's no token or it
+ * was rejected. fetchJson(url, options) does the HTTP call and throws on errors.
+ * Returns the token response ({ access_token, refresh_token, user }).
+ */
+function authenticate(c, fetchJson, saveRefreshToken, log) {
+  var tokenUrl = c.SUPABASE_URL + '/auth/v1/token?grant_type=';
+  var post = function (payload) {
+    return { method: 'post', contentType: 'application/json', headers: { apikey: c.SUPABASE_ANON_KEY }, payload: JSON.stringify(payload) };
+  };
+  var hasPassword = Boolean(c.FLASHCARD_EMAIL && c.FLASHCARD_PASSWORD);
+  if (c.FLASHCARD_REFRESH_TOKEN) {
+    try {
+      var auth = fetchJson(tokenUrl + 'refresh_token', post({ refresh_token: c.FLASHCARD_REFRESH_TOKEN }));
+      saveRefreshToken(auth.refresh_token);
+      return auth;
+    } catch (error) {
+      if (!hasPassword) {
+        throw new Error('The FLASHCARD_REFRESH_TOKEN Script Property was rejected (' + error.message + '). Make a new one with `npm run auth:login -- --print` and paste it in.');
+      }
+      if (log) log('Refresh token rejected (' + error.message + '); signing in with the password instead.');
+    }
+  }
+  if (!hasPassword) throw new Error('Set the FLASHCARD_REFRESH_TOKEN Script Property (or FLASHCARD_EMAIL and FLASHCARD_PASSWORD).');
+  return fetchJson(tokenUrl + 'password', post({ email: c.FLASHCARD_EMAIL, password: c.FLASHCARD_PASSWORD }));
+}
+
 // ---------------------------------------------------------- Apps Script glue
 
 /** Daily entry point: add new Word of the Day emails to the deck, then label them. */
@@ -165,11 +196,14 @@ function findWordGeniusEmails_() {
 
 function config_() {
   var props = PropertiesService.getScriptProperties();
-  var keys = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'FLASHCARD_EMAIL', 'FLASHCARD_PASSWORD'];
   var config = {};
-  keys.forEach(function (k) {
+  ['SUPABASE_URL', 'SUPABASE_ANON_KEY'].forEach(function (k) {
     config[k] = props.getProperty(k);
     if (!config[k]) throw new Error('Missing Script Property ' + k + ' (Project Settings → Script Properties).');
+  });
+  // Either a refresh token (preferred) or email + password; authenticate() checks which
+  ['FLASHCARD_REFRESH_TOKEN', 'FLASHCARD_EMAIL', 'FLASHCARD_PASSWORD'].forEach(function (k) {
+    config[k] = props.getProperty(k);
   });
   config.SUPABASE_URL = config.SUPABASE_URL.replace(/\/+$/, '');
   return config;
@@ -186,12 +220,22 @@ function fetchJson_(url, options) {
 
 /** Sign in, then merge the entries into the cloud row with compare-and-swap, retrying if it changed. */
 function updateVocabulary_(entries) {
-  var c = config_();
-  var auth = fetchJson_(c.SUPABASE_URL + '/auth/v1/token?grant_type=password', {
-    method: 'post', contentType: 'application/json',
-    headers: { apikey: c.SUPABASE_ANON_KEY },
-    payload: JSON.stringify({ email: c.FLASHCARD_EMAIL, password: c.FLASHCARD_PASSWORD }),
-  });
+  // One run at a time: two runs sharing a refresh token would each rotate it
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var c = config_();
+    var props = PropertiesService.getScriptProperties();
+    var auth = authenticate(c, fetchJson_, function (token) {
+      props.setProperty('FLASHCARD_REFRESH_TOKEN', token);
+    }, function (message) { Logger.log(message); });
+    return writeVocabulary_(c, auth, entries);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function writeVocabulary_(c, auth, entries) {
   var headers = { apikey: c.SUPABASE_ANON_KEY, Authorization: 'Bearer ' + auth.access_token };
   var rowUrl = c.SUPABASE_URL + '/rest/v1/user_progress?user_id=eq.' + auth.user.id;
 

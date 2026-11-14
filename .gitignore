@@ -5,6 +5,9 @@ dist/
 .claude/*
 !.claude/commands/
 *.local
+.env
+# Rotating Supabase refresh token written by scripts/supabaseAuth.mjs
+.flashcard-refresh-token
 __pycache__/
 *.pyc
 coverage/

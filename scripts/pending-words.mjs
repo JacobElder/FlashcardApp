@@ -8,32 +8,33 @@
 //               "example"?: "...", "word"?: "corrected spelling" }]
 //
 // Signs in as you (RLS only exposes your own row). Needs, in .env.local:
-//   VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, FLASHCARD_EMAIL, FLASHCARD_PASSWORD
+//   VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, and either a refresh token
+//   (preferred: run `npm run auth:login` once) or FLASHCARD_EMAIL + FLASHCARD_PASSWORD.
+//   See scripts/supabaseAuth.mjs.
 import { readFileSync } from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
 import { applyDefinitions } from './applyDefinitions.mjs';
 
-const { VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, FLASHCARD_EMAIL, FLASHCARD_PASSWORD } = process.env;
+import { CLI_AUTH_OPTIONS, missingCredentials, signIn } from './supabaseAuth.mjs';
+
+const { VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY } = process.env;
 
 function fail(message) {
   console.error(message);
   process.exit(1);
 }
 
-const missing = Object.entries({ VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, FLASHCARD_EMAIL, FLASHCARD_PASSWORD })
-  .filter(([, value]) => !value)
-  .map(([name]) => name);
+const missing = missingCredentials(process.env);
 if (missing.length > 0) fail(`Missing ${missing.join(', ')} in .env.local`);
 
-const supabase = createClient(VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, {
-  auth: { persistSession: false },
-});
-const { data: auth, error: authError } = await supabase.auth.signInWithPassword({
-  email: FLASHCARD_EMAIL,
-  password: FLASHCARD_PASSWORD,
-});
-if (authError) fail(`Sign-in failed: ${authError.message}`);
-const userId = auth.user.id;
+const supabase = createClient(VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, CLI_AUTH_OPTIONS);
+let session;
+try {
+  session = await signIn(supabase, process.env);
+} catch (error) {
+  fail(error.message);
+}
+const { userId } = session;
 
 async function readRow() {
   const { data, error } = await supabase
@@ -84,4 +85,4 @@ if (command === 'list') {
   fail('Usage: pending-words.mjs list | apply <defs.json>');
 }
 
-await supabase.auth.signOut();
+await session.signOut();
