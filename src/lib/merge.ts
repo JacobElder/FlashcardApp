@@ -1,5 +1,6 @@
-import type { IRTCardHistory, IRTProfile, PendingWord, UserVocabulary, VocabularyCard } from '../types';
-import { EMPTY_STUDY_STATS, type StudyStats } from './storage';
+import type { DeviceCardCounts, IRTCardHistory, IRTProfile, PendingWord, UserVocabulary, VocabularyCard } from '../types';
+import { EMPTY_STUDY_STATS, type CountsByDevice, type DeviceStudyTotals, type StudyStats } from './storage';
+import { initialAbilityInfo } from './irt';
 
 /** Ability points kept for the analytics chart; older points are dropped. */
 export const MAX_ABILITY_HISTORY = 500;
@@ -12,6 +13,93 @@ const finite = (value: unknown, fallback = 0): number =>
   typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 const text = (value: unknown): string => (typeof value === 'string' ? value : '');
 const list = <T>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
+
+// ---- Per-device grow-only counters ----------------------------------------
+//
+// A count recorded on several devices is kept as its total plus a breakdown
+// { deviceId: n }. Each device only ever increases its own entry, so merging
+// two copies takes the larger value per device and adds them up. The part of
+// a total its breakdown doesn't explain is "legacy" (counted before devices
+// were tracked); legacy parts are merged with max, as all counts used to be.
+//
+// A copy with no breakdown at all was written by an older app version (which
+// drops unknown fields) or predates tracking; its legacy part is what's left
+// after the other copy's device entries, so a stale client re-uploading a
+// total that already includes them doesn't double count.
+
+type Buckets = Record<string, number>;
+
+const sum = (buckets: Buckets | undefined) =>
+  Object.values(buckets ?? {}).reduce((total, n) => total + n, 0);
+
+/** Positive finite entries of a breakdown; undefined when there is no breakdown at all. */
+function cleanBuckets(value: unknown): Buckets | undefined {
+  if (!isRecord(value)) return undefined;
+  return Object.fromEntries(Object.entries(value).filter(
+    (entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isFinite(entry[1]) && entry[1] > 0
+  ));
+}
+
+export interface MergedCounter {
+  total: number;
+  /** Per-device entries (possibly empty); undefined when neither side had a breakdown. */
+  buckets: Buckets | undefined;
+}
+
+/**
+ * Merge one grow-only counter. `undefined` buckets mean that copy has no
+ * breakdown (see above); `{}` means it has one with no device entries yet.
+ */
+export function mergeCounter(
+  localTotal: number,
+  localBuckets: Buckets | undefined,
+  remoteTotal: number,
+  remoteBuckets: Buckets | undefined
+): MergedCounter {
+  const l = cleanBuckets(localBuckets);
+  const r = cleanBuckets(remoteBuckets);
+  const legacy = Math.max(
+    0,
+    finite(localTotal) - sum(l ?? r),
+    finite(remoteTotal) - sum(r ?? l)
+  );
+  if (!l && !r) return { total: legacy, buckets: undefined };
+  const merged: Buckets = { ...l };
+  for (const [device, n] of Object.entries(r ?? {})) merged[device] = Math.max(merged[device] ?? 0, n);
+  return { total: legacy + sum(merged), buckets: merged };
+}
+
+type Breakdown<F extends string> = Record<string, Partial<Record<F, number>>>;
+
+/** Field `field` of each device entry, as { device: n }; undefined without a breakdown. */
+function column<F extends string>(byDevice: unknown, field: F): Buckets | undefined {
+  if (!isRecord(byDevice) || Object.keys(byDevice).length === 0) return undefined;
+  const out: Buckets = {};
+  for (const [device, entry] of Object.entries(byDevice)) {
+    const n = isRecord(entry) ? entry[field] : undefined;
+    if (typeof n === 'number') out[device] = n;
+  }
+  return out;
+}
+
+/** Merge several counters that share one per-device breakdown (e.g. a card's answer counts). */
+function mergeCounterGroup<F extends string>(
+  fields: readonly F[],
+  local: { totals: Record<F, number>; byDevice: unknown },
+  remote: { totals: Record<F, number>; byDevice: unknown }
+): { totals: Record<F, number>; byDevice: Breakdown<F> | undefined } {
+  const totals = {} as Record<F, number>;
+  const byDevice: Breakdown<F> = {};
+  for (const field of fields) {
+    const merged = mergeCounter(
+      local.totals[field], column(local.byDevice, field),
+      remote.totals[field], column(remote.byDevice, field)
+    );
+    totals[field] = merged.total;
+    for (const [device, n] of Object.entries(merged.buckets ?? {})) (byDevice[device] ??= {})[field] = n;
+  }
+  return { totals, byDevice: Object.keys(byDevice).length > 0 ? byDevice : undefined };
+}
 
 function normalizeProfile(profile: IRTProfile): IRTProfile {
   const cardHistory = isRecord(profile.cardHistory)
@@ -34,14 +122,38 @@ function lastActivity(profile: IRTProfile): string {
   return text(profile.updatedAt) || text(history[history.length - 1]?.date);
 }
 
-function newerHistory(a: IRTCardHistory, b: IRTCardHistory): IRTCardHistory {
-  return text(b.lastAnsweredDate) > text(a.lastAnsweredDate) ? b : a;
+const CARD_COUNTS = ['n', 'c', 'mn', 'mc'] as const;
+
+const cardTotals = (h: IRTCardHistory): Record<keyof DeviceCardCounts, number> => ({
+  n: finite(h.timesAnswered), c: finite(h.timesCorrect), mn: finite(h.mcTimesAnswered), mc: finite(h.mcTimesCorrect),
+});
+
+/**
+ * Merge two copies of one card's history. Scheduling state (box, review
+ * date, difficulty estimates, streak) comes from the more recently answered
+ * copy; answer counts are per-device counters, so answers made on both
+ * devices since the last sync all count.
+ */
+export function mergeCardHistory(a: IRTCardHistory, b: IRTCardHistory): IRTCardHistory {
+  const newer = text(b.lastAnsweredDate) > text(a.lastAnsweredDate) ? b : a;
+  const { totals, byDevice } = mergeCounterGroup(
+    CARD_COUNTS,
+    { totals: cardTotals(a), byDevice: a.byDevice },
+    { totals: cardTotals(b), byDevice: b.byDevice }
+  );
+  const merged: IRTCardHistory = { ...newer, timesAnswered: totals.n, timesCorrect: totals.c };
+  if (totals.mn || newer.mcTimesAnswered !== undefined) merged.mcTimesAnswered = totals.mn;
+  if (totals.mc || newer.mcTimesCorrect !== undefined) merged.mcTimesCorrect = totals.mc;
+  if (byDevice) merged.byDevice = byDevice;
+  else delete merged.byDevice;
+  return merged;
 }
 
 /**
  * Merge two copies of a deck profile (e.g. this device and the cloud).
- * Each card keeps whichever copy was answered most recently, so studying on
- * two devices never discards answers from either.
+ * Cards are merged one by one (see mergeCardHistory). Ability comes from the
+ * copy with more accumulated evidence (ties: the more recent one); ability
+ * history is the sorted, de-duplicated union of both.
  */
 export function mergeProfiles(local: IRTProfile | undefined, remote: IRTProfile | undefined): IRTProfile {
   if (isEmpty(remote)) return isEmpty(local) ? { ability: 0, cardHistory: {} } : normalizeProfile(local!);
@@ -51,7 +163,7 @@ export function mergeProfiles(local: IRTProfile | undefined, remote: IRTProfile 
 
   const cardHistory: Record<string, IRTCardHistory> = { ...l.cardHistory };
   for (const [key, entry] of Object.entries(r.cardHistory)) {
-    cardHistory[key] = cardHistory[key] ? newerHistory(cardHistory[key], entry) : entry;
+    cardHistory[key] = cardHistory[key] ? mergeCardHistory(cardHistory[key], entry) : entry;
   }
 
   const seen = new Set<string>();
@@ -64,12 +176,16 @@ export function mergeProfiles(local: IRTProfile | undefined, remote: IRTProfile 
     : undefined;
 
   const newer = lastActivity(r) > lastActivity(l) ? r : l;
+  const infoL = initialAbilityInfo(l);
+  const infoR = initialAbilityInfo(r);
+  const source = infoL === infoR ? newer : infoR > infoL ? r : l;
+  const updatedAt = [l.updatedAt, r.updatedAt].filter((t): t is string => typeof t === 'string').sort().pop();
   return {
-    ability: newer.ability,
-    abilityInfo: newer.abilityInfo,
+    ability: source.ability,
+    abilityInfo: source.abilityInfo,
     cardHistory,
     abilityHistory,
-    updatedAt: newer.updatedAt ?? l.updatedAt ?? r.updatedAt,
+    updatedAt,
   };
 }
 
@@ -84,7 +200,7 @@ function normalizeVocabulary(vocab: UserVocabulary): Required<UserVocabulary> {
   };
 }
 
-/** Lower sorts first; used to pick the same survivor on every device. */
+/** Lower sorts first; used to pick the same pending survivor on every device. */
 const byStamp = <T extends { id: string }>(stamp: (item: T) => string) =>
   (a: T, b: T) => stamp(a).localeCompare(stamp(b)) || a.id.localeCompare(b.id);
 
@@ -98,10 +214,26 @@ export function mergeVocabulary(
   local: UserVocabulary | undefined,
   remote: UserVocabulary | undefined
 ): UserVocabulary {
-  if (isEmpty(remote)) {
-    return isEmpty(local) ? { words: [], deletedIds: [], lastUpdated: '' } : normalizeVocabulary(local!);
+  return mergeVocabularyWithAliases(local, remote).vocabulary;
+}
+
+/**
+ * mergeVocabulary, also returning which word ids were dropped as duplicates
+ * and the id each was collapsed into, so their study history can follow.
+ */
+export function mergeVocabularyWithAliases(
+  local: UserVocabulary | undefined,
+  remote: UserVocabulary | undefined
+): { vocabulary: UserVocabulary; replaced: Record<string, string> } {
+  // Duplicates within a single copy are collapsed too, so run even when one side is empty
+  if (isEmpty(local) && isEmpty(remote)) {
+    return { vocabulary: { words: [], deletedIds: [], lastUpdated: '' }, replaced: {} };
   }
-  if (isEmpty(local)) return normalizeVocabulary(remote!);
+  if (isEmpty(remote) || isEmpty(local)) {
+    const only = normalizeVocabulary((isEmpty(remote) ? local : remote)!);
+    const { words, replaced } = collapseDuplicates(only.words, only, only, new Set(only.deletedIds));
+    return { vocabulary: Object.keys(replaced).length ? { ...only, words } : only, replaced };
+  }
   const l = normalizeVocabulary(local!);
   const r = normalizeVocabulary(remote!);
 
@@ -119,15 +251,7 @@ export function mergeVocabulary(
     if (!other || wordStamp(word, newer) >= wordStamp(other, older)) byId.set(word.id, word);
   }
 
-  // A word added on two devices has two ids; keep one, the same one everywhere
-  const byWord = new Map<string, VocabularyCard>();
-  const firstCreated = byStamp<VocabularyCard>(w => w.id);
-  for (const word of [...byId.values()].filter(w => !deleted.has(w.id)).sort(firstCreated)) {
-    const key = normalizeWord(word.word);
-    if (!byWord.has(key)) byWord.set(key, word);
-  }
-  const keptIds = new Set([...byWord.values()].map(w => w.id));
-  const words = [...byId.values()].filter(w => keptIds.has(w.id));
+  const { words, replaced, byWord } = collapseDuplicates([...byId.values()], newer, older, deleted, wordStamp);
 
   // A pending word that became a card (same id or same word) or was deleted on either side is done
   const resolved = new Set([...deleted, ...byId.keys()]);
@@ -142,27 +266,103 @@ export function mergeVocabulary(
   const keptPending = new Set(pendingByWord.values());
 
   const pending = [...pendingById.values()].filter(p => keptPending.has(p));
-  return {
+  const vocabulary = {
     words,
     // Left out when neither side has a queue, so merging identical copies changes nothing
     ...(local!.pending || remote!.pending ? { pending } : {}),
     deletedIds,
     lastUpdated: newer.lastUpdated,
   };
+  return { vocabulary, replaced };
 }
 
+/**
+ * A word added on two devices has two ids; keep one, the same one everywhere:
+ * the most recently edited copy (ties: the lower id). Deleted words are dropped.
+ */
+function collapseDuplicates(
+  all: VocabularyCard[],
+  newer: Required<UserVocabulary>,
+  older: Required<UserVocabulary>,
+  deleted: Set<string>,
+  wordStamp: (word: VocabularyCard, owner: Required<UserVocabulary>) => string =
+    (word, owner) => text(word.updatedAt) || owner.lastUpdated
+) {
+  const newerIds = new Set(newer.words.map(w => w.id));
+  const stamp = (w: VocabularyCard) => wordStamp(w, newerIds.has(w.id) ? newer : older);
+  const latestFirst = (a: VocabularyCard, b: VocabularyCard) =>
+    stamp(b).localeCompare(stamp(a)) || a.id.localeCompare(b.id);
+  const byWord = new Map<string, VocabularyCard>();
+  const replaced: Record<string, string> = {};
+  for (const word of all.filter(w => !deleted.has(w.id)).sort(latestFirst)) {
+    const key = normalizeWord(word.word);
+    const kept = byWord.get(key);
+    if (kept) replaced[word.id] = kept.id;
+    else byWord.set(key, word);
+  }
+  const keptIds = new Set([...byWord.values()].map(w => w.id));
+  return { words: all.filter(w => keptIds.has(w.id)), replaced, byWord };
+}
+
+/**
+ * Move study history from vocabulary ids dropped as duplicates to the id that
+ * replaced them. If both have history, the one answered more recently is kept
+ * (its answer counts merged with the other's).
+ */
+export function carryOverHistory(profile: IRTProfile, replaced: Record<string, string>): IRTProfile {
+  const moves = Object.entries(replaced).filter(([dropped]) => profile.cardHistory?.[dropped]);
+  if (moves.length === 0) return profile;
+  const cardHistory = { ...profile.cardHistory };
+  for (const [dropped, survivor] of moves) {
+    const moved = { ...cardHistory[dropped], cardId: survivor };
+    delete cardHistory[dropped];
+    const existing = cardHistory[survivor];
+    cardHistory[survivor] = existing
+      ? { ...mergeCardHistory(existing, moved), cardId: survivor }
+      : moved;
+  }
+  return { ...profile, cardHistory };
+}
+
+/** Key in the cloud's incorrect_counts column that holds the per-device breakdown. */
+export const COUNTS_BY_DEVICE_FIELD = '__byDevice';
+
+/**
+ * Merge per-card miss counts. Each side is the flat { cardId: n } map plus
+ * its per-device breakdown { deviceId: { cardId: n } } (undefined if absent).
+ */
 export function mergeCounts(
   local: Record<string, number> | undefined,
-  remote: Record<string, number> | undefined
-): Record<string, number> {
-  const merged: Record<string, number> = {};
-  for (const source of [local, remote]) {
-    if (!isRecord(source)) continue;
-    for (const [id, count] of Object.entries(source)) {
-      if (Number.isFinite(count)) merged[id] = Math.max(merged[id] ?? 0, count as number);
+  remote: Record<string, number> | undefined,
+  localByDevice?: CountsByDevice,
+  remoteByDevice?: CountsByDevice
+): { counts: Record<string, number>; byDevice: CountsByDevice | undefined } {
+  const flat = (source: unknown) =>
+    isRecord(source) ? Object.fromEntries(Object.entries(source).filter(([, n]) => typeof n === 'number' && Number.isFinite(n))) as Record<string, number> : {};
+  const l = flat(local);
+  const r = flat(remote);
+  // Transpose { device: { card: n } } to { card: { device: n } }, keeping "has a breakdown" as {}
+  const perCard = (byDevice: unknown) => {
+    if (!isRecord(byDevice) || Object.keys(byDevice).length === 0) return undefined;
+    const out: Record<string, Buckets> = {};
+    for (const [device, cards] of Object.entries(byDevice)) {
+      if (!isRecord(cards)) continue;
+      for (const [card, n] of Object.entries(cards)) if (typeof n === 'number') (out[card] ??= {})[device] = n;
     }
+    return out;
+  };
+  const lb = perCard(localByDevice);
+  const rb = perCard(remoteByDevice);
+
+  const counts: Record<string, number> = {};
+  const byDevice: CountsByDevice = {};
+  const ids = new Set([...Object.keys(l), ...Object.keys(r), ...Object.keys(lb ?? {}), ...Object.keys(rb ?? {})]);
+  for (const id of ids) {
+    const merged = mergeCounter(l[id] ?? 0, lb ? lb[id] ?? {} : undefined, r[id] ?? 0, rb ? rb[id] ?? {} : undefined);
+    if (merged.total > 0 || id in l || id in r) counts[id] = merged.total;
+    for (const [device, n] of Object.entries(merged.buckets ?? {})) (byDevice[device] ??= {})[id] = n;
   }
-  return merged;
+  return { counts, byDevice: lb || rb ? byDevice : undefined };
 }
 
 function normalizeStats(stats: StudyStats): StudyStats {
@@ -172,8 +372,14 @@ function normalizeStats(stats: StudyStats): StudyStats {
     totalIncorrect: finite(stats.totalIncorrect),
     lastStudyDate: text(stats.lastStudyDate),
     streak: finite(stats.streak),
+    ...(isRecord(stats.devices) ? { devices: stats.devices } : {}),
   };
 }
+
+const STAT_COUNTS = ['reviewed', 'correct', 'incorrect'] as const;
+const statTotals = (s: StudyStats): Record<keyof DeviceStudyTotals, number> => ({
+  reviewed: s.totalCardsReviewed, correct: s.totalCorrect, incorrect: s.totalIncorrect,
+});
 
 export function mergeStats(local: StudyStats | undefined, remote: StudyStats | undefined): StudyStats {
   if (isEmpty(remote)) return isEmpty(local) ? EMPTY_STUDY_STATS : normalizeStats(local!);
@@ -182,11 +388,18 @@ export function mergeStats(local: StudyStats | undefined, remote: StudyStats | u
   const r = normalizeStats(remote!);
 
   const latest = r.lastStudyDate > l.lastStudyDate ? r : l;
+  // Totals are per-device counters, so study on two devices adds up
+  const { totals, byDevice } = mergeCounterGroup(
+    STAT_COUNTS,
+    { totals: statTotals(l), byDevice: l.devices },
+    { totals: statTotals(r), byDevice: r.devices }
+  );
   return {
-    totalCardsReviewed: Math.max(l.totalCardsReviewed, r.totalCardsReviewed),
-    totalCorrect: Math.max(l.totalCorrect, r.totalCorrect),
-    totalIncorrect: Math.max(l.totalIncorrect, r.totalIncorrect),
+    totalCardsReviewed: totals.reviewed,
+    totalCorrect: totals.correct,
+    totalIncorrect: totals.incorrect,
     lastStudyDate: latest.lastStudyDate,
     streak: r.lastStudyDate === l.lastStudyDate ? Math.max(l.streak, r.streak) : latest.streak,
+    ...(byDevice ? { devices: byDevice } : {}),
   };
 }

@@ -16,7 +16,7 @@ import {
   updateItemDifficulty,
 } from '../lib/irt';
 import { MAX_ABILITY_HISTORY } from '../lib/merge';
-import { setToStorage, updateStudyStats, incrementIncorrectCount } from '../lib/storage';
+import { getDeviceId, setToStorage, updateStudyStats, incrementIncorrectCount } from '../lib/storage';
 import { useStorageValue } from './useStorageValue';
 
 /** Cards per session before the summary is shown. */
@@ -236,8 +236,16 @@ export function useAdaptiveTesting({
     const answeredInFormat = isMc ? history.mcTimesAnswered ?? 0 : history.timesAnswered;
     const calibrated = updateItemDifficulty(irtProfile.ability, item, isCorrect, answeredInFormat);
 
+    // This device's share of the answer counts, so a sync can add up devices
+    const device = getDeviceId();
+    const mine = history.byDevice?.[device] ?? {};
+    const myCounts = isMc
+      ? { ...mine, mn: (mine.mn ?? 0) + 1, ...(isCorrect ? { mc: (mine.mc ?? 0) + 1 } : {}) }
+      : { ...mine, n: (mine.n ?? 0) + 1, ...(isCorrect ? { c: (mine.c ?? 0) + 1 } : {}) };
+
     const updatedHistory: IRTCardHistory = {
       ...history,
+      byDevice: { ...history.byDevice, [device]: myCounts },
       lastAnsweredDate: now.toISOString(),
       leitnerBox: box,
       nextReviewDate: nextReview,

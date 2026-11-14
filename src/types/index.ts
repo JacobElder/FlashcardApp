@@ -47,6 +47,25 @@ export interface IRTCardHistory {
   mcTimesCorrect?: number;
   /** Correct answers in a row (either format); a miss resets it. Lets trouble cards graduate. */
   correctStreak?: number;
+  /**
+   * The answer counts above split by the device that recorded them, so a sync
+   * can add up answers made on different devices instead of keeping one copy.
+   * Answers not listed here (recorded before this existed) are "legacy":
+   * the count minus the sum of its devices.
+   */
+  byDevice?: Record<string, DeviceCardCounts>;
+}
+
+/** One device's share of a card's answer counts (zeros omitted). */
+export interface DeviceCardCounts {
+  /** timesAnswered */
+  n?: number;
+  /** timesCorrect */
+  c?: number;
+  /** mcTimesAnswered */
+  mn?: number;
+  /** mcTimesCorrect */
+  mc?: number;
 }
 
 export interface IRTProfile {

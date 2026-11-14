@@ -4,7 +4,7 @@ import { deckMastery, nextBox, useAdaptiveTesting } from './useAdaptiveTesting';
 import { triviaCards } from '../data/triviaCards';
 import { MAX_ABILITY_HISTORY } from '../lib/merge';
 import { RATING_VALUES, type FlashCard, type IRTProfile } from '../types';
-import { STORAGE_KEYS, getFromStorage, getIncorrectCounts, getStudyStats, setToStorage } from '../lib/storage';
+import { STORAGE_KEYS, getDeviceId, getFromStorage, getIncorrectCounts, getIncorrectCountsByDevice, getStudyStats, setToStorage } from '../lib/storage';
 
 const KEY = STORAGE_KEYS.TRIVIA_PROGRESS;
 const cards: FlashCard[] = ['a', 'b', 'c', 'd'].map(id => ({
@@ -444,5 +444,18 @@ describe('mastery', () => {
     const history = { a: { cardId: 'a', timesAnswered: 5, timesCorrect: 5, leitnerBox: 5 }, b: { cardId: 'b', timesAnswered: 2, timesCorrect: 2, leitnerBox: 5 } };
     expect(deckMastery(cards, history)).toBe(50);
     expect(deckMastery([], history)).toBe(0);
+  });
+});
+
+describe('per-device counts', () => {
+  it('records each answer under this device for the card, the stats and the miss count', () => {
+    const { result } = render();
+    const id = result.current.currentCard!.id;
+    act(() => result.current.rateCard(RATING_VALUES.again));
+    const device = getDeviceId();
+    expect(readProfile().cardHistory[id].byDevice).toEqual({ [device]: { n: 1 } });
+    expect(getStudyStats().devices).toEqual({ [device]: { reviewed: 1, correct: 0, incorrect: 1 } });
+    expect(getIncorrectCountsByDevice()).toEqual({ [device]: { [id]: 1 } });
+    expect(getDeviceId()).toBe(device); // stable
   });
 });

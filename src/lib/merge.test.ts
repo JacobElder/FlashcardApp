@@ -1,5 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { MAX_ABILITY_HISTORY, mergeCounts, mergeProfiles, mergeStats, mergeVocabulary } from './merge';
+import {
+  MAX_ABILITY_HISTORY,
+  carryOverHistory,
+  mergeCardHistory,
+  mergeCounter,
+  mergeCounts,
+  mergeProfiles,
+  mergeStats,
+  mergeVocabulary,
+  mergeVocabularyWithAliases,
+} from './merge';
 import type { IRTProfile, UserVocabulary, VocabularyCard } from '../types';
 
 const entry = (cardId: string, lastAnsweredDate: string, leitnerBox: number) => ({
@@ -33,7 +43,8 @@ describe('mergeProfiles', () => {
     expect(merged.cardHistory.a.leitnerBox).toBe(3);
     expect(merged.cardHistory.b.leitnerBox).toBe(2);
     expect(merged.cardHistory.c).toBeDefined();
-    expect(merged.ability).toBe(0.5); // local was updated more recently
+    // Neither has abilityInfo; remote answered more cards, so it carries more evidence
+    expect(merged.ability).toBe(-0.5);
   });
 
   it('unions, sorts, dedupes and caps ability history', () => {
@@ -51,6 +62,14 @@ describe('mergeProfiles', () => {
 });
 
 describe('mergeProfiles edge cases', () => {
+  it('takes ability from the copy with more accumulated evidence', () => {
+    const merged = mergeProfiles(
+      { ability: 1.5, abilityInfo: 30, cardHistory: {}, updatedAt: '2026-01-01' },
+      { ability: 0.2, abilityInfo: 2, cardHistory: {}, updatedAt: '2026-01-05' }
+    );
+    expect(merged).toMatchObject({ ability: 1.5, abilityInfo: 30, updatedAt: '2026-01-05' });
+  });
+
   it('breaks a lastAnsweredDate tie in favour of the local copy', () => {
     const merged = mergeProfiles(
       { ability: 0, cardHistory: { a: entry('a', '2026-01-01', 3) } },
@@ -101,11 +120,28 @@ describe('mergeVocabulary', () => {
     expect(merged.words[0].definition).toBe('local');
   });
 
-  it('collapses the same word added on two devices to one card, the same one on both', () => {
-    const one = { words: [word('user-1', 'd', '2026-01-01', 'Laconic')], lastUpdated: '2026-01-01' };
-    const two = { words: [word('user-2', 'd', '2026-01-02', 'laconic ')], lastUpdated: '2026-01-02' };
+  it('collapses the same word added on two devices to its most recently edited copy, the same one on both', () => {
+    const one = { words: [word('user-1', 'old', '2026-01-01', 'Laconic')], lastUpdated: '2026-01-01' };
+    const two = { words: [word('user-2', 'new', '2026-01-02', 'laconic ')], lastUpdated: '2026-01-02' };
+    for (const merged of [mergeVocabularyWithAliases(one, two), mergeVocabularyWithAliases(two, one)]) {
+      expect(merged.vocabulary.words.map(w => w.definition)).toEqual(['new']);
+      expect(merged.replaced).toEqual({ 'user-1': 'user-2' });
+    }
+  });
+
+  it('breaks a duplicate edit-time tie by the lower id', () => {
+    const one = { words: [word('user-1', 'a', '2026-01-01', 'sere')], lastUpdated: '2026-01-01' };
+    const two = { words: [word('user-2', 'b', '2026-01-01', 'Sere')], lastUpdated: '2026-01-01' };
     expect(mergeVocabulary(one, two).words.map(w => w.id)).toEqual(['user-1']);
     expect(mergeVocabulary(two, one).words.map(w => w.id)).toEqual(['user-1']);
+  });
+
+  it('moves study history from a collapsed duplicate to the surviving word', () => {
+    const profile: IRTProfile = { ability: 0, cardHistory: { 'user-1': { ...entry('user-1', '2026-01-03', 3), timesAnswered: 4 } } };
+    const moved = carryOverHistory(profile, { 'user-1': 'user-2' });
+    expect(Object.keys(moved.cardHistory)).toEqual(['user-2']);
+    expect(moved.cardHistory['user-2']).toMatchObject({ cardId: 'user-2', leitnerBox: 3, timesAnswered: 4 });
+    expect(carryOverHistory(profile, {})).toBe(profile);
   });
 
   it('collapses the same word captured on two devices to one pending entry', () => {
@@ -151,17 +187,67 @@ describe('mergeVocabulary', () => {
   });
 });
 
+describe('mergeCounter (per-device counts)', () => {
+  it('adds up what each device counted', () => {
+    // Both started from 6 legacy answers, then A did 3 and B did 2 without syncing
+    expect(mergeCounter(9, { A: 3 }, 8, { B: 2 })).toEqual({ total: 11, buckets: { A: 3, B: 2 } });
+  });
+
+  it('treats legacy totals like the old max merge', () => {
+    expect(mergeCounter(10, undefined, 12, undefined)).toEqual({ total: 12, buckets: undefined });
+  });
+
+  it('does not double count a total re-uploaded by an older app version', () => {
+    // Cloud had legacy 4 + A 5; an old client added 3 and wrote 12 without the breakdown
+    expect(mergeCounter(9, { A: 5 }, 12, undefined).total).toBe(12);
+  });
+
+  it('is idempotent and order-independent', () => {
+    const a = mergeCounter(9, { A: 3 }, 8, { B: 2 });
+    expect(mergeCounter(a.total, a.buckets, a.total, a.buckets)).toEqual(a);
+    expect(mergeCounter(8, { B: 2 }, 9, { A: 3 })).toEqual(a);
+  });
+});
+
 describe('mergeCounts', () => {
-  it('takes the max per card', () => {
-    expect(mergeCounts({ a: 2, b: 1 }, { a: 1, c: 3 })).toEqual({ a: 2, b: 1, c: 3 });
+  it('takes the max per card for legacy counts', () => {
+    expect(mergeCounts({ a: 2, b: 1 }, { a: 1, c: 3 }).counts).toEqual({ a: 2, b: 1, c: 3 });
+  });
+
+  it('adds misses made on different devices', () => {
+    const merged = mergeCounts({ a: 3 }, { a: 2, b: 1 }, { A: { a: 2 } }, { B: { a: 1, b: 1 } });
+    expect(merged.counts).toEqual({ a: 4, b: 1 }); // 1 legacy + 2 on A + 1 on B
+    expect(merged.byDevice).toEqual({ A: { a: 2 }, B: { a: 1, b: 1 } });
   });
 
   it('ignores non-numeric counts', () => {
-    expect(mergeCounts({ a: 1 }, { a: 'x', b: null, c: 4 } as unknown as Record<string, number>)).toEqual({ a: 1, c: 4 });
+    expect(mergeCounts({ a: 1 }, { a: 'x', b: null, c: 4 } as unknown as Record<string, number>).counts).toEqual({ a: 1, c: 4 });
+  });
+});
+
+describe('mergeCardHistory', () => {
+  it('adds answers made on two devices and takes scheduling from the newer copy', () => {
+    const base = { cardId: 'a', timesAnswered: 3, timesCorrect: 2 };
+    const onA = { ...base, timesAnswered: 5, timesCorrect: 4, leitnerBox: 2, lastAnsweredDate: '2026-01-02', byDevice: { A: { n: 2, c: 2 } } };
+    const onB = { ...base, timesAnswered: 4, timesCorrect: 2, leitnerBox: 0, lastAnsweredDate: '2026-01-03', byDevice: { B: { n: 1 } } };
+    const merged = mergeCardHistory(onA, onB);
+    expect(merged).toMatchObject({ timesAnswered: 6, timesCorrect: 4, leitnerBox: 0, lastAnsweredDate: '2026-01-03' });
+    expect(merged.byDevice).toEqual({ A: { n: 2, c: 2 }, B: { n: 1 } });
+    expect(mergeCardHistory(onB, onA)).toEqual(merged);
   });
 });
 
 describe('mergeStats', () => {
+  it('adds up study done on two devices', () => {
+    const shared = { lastStudyDate: '2026-01-05', streak: 1 };
+    const merged = mergeStats(
+      { ...shared, totalCardsReviewed: 13, totalCorrect: 10, totalIncorrect: 3, devices: { A: { reviewed: 3, correct: 2, incorrect: 1 } } },
+      { ...shared, totalCardsReviewed: 15, totalCorrect: 12, totalIncorrect: 3, devices: { B: { reviewed: 5, correct: 4, incorrect: 1 } } }
+    );
+    expect(merged).toMatchObject({ totalCardsReviewed: 18, totalCorrect: 14, totalIncorrect: 4 });
+    expect(merged.devices).toEqual({ A: { reviewed: 3, correct: 2, incorrect: 1 }, B: { reviewed: 5, correct: 4, incorrect: 1 } });
+  });
+
   it('keeps the latest streak and the larger totals', () => {
     const merged = mergeStats(
       { totalCardsReviewed: 10, totalCorrect: 8, totalIncorrect: 2, lastStudyDate: '2026-01-05', streak: 3 },

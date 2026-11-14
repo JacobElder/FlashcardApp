@@ -485,6 +485,35 @@ describe('cloud sync', () => {
     expect(stableStringify({ b: 1, a: { d: 2, c: [3, { f: 4, e: 5 }] } })).toBe('{"a":{"c":[3,{"e":5,"f":4}],"d":2},"b":1}');
   });
 
+  it('adds up misses and study totals from two devices through the cloud row', async () => {
+    seed({
+      incorrect_counts: { a: 2, __byDevice: { other: { a: 1 } } }, // 1 legacy + 1 on the other device
+      study_stats: { totalCardsReviewed: 5, totalCorrect: 4, totalIncorrect: 1, lastStudyDate: '2026-01-01', streak: 1, devices: { other: { reviewed: 5, correct: 4, incorrect: 1 } } },
+    });
+    // This device, not yet synced: the same legacy miss plus two of its own
+    setToStorage(STORAGE_KEYS.INCORRECT_COUNTS, { a: 3 });
+    setToStorage(STORAGE_KEYS.INCORRECT_COUNTS_BY_DEVICE, { me: { a: 2 } });
+    setToStorage(STORAGE_KEYS.STUDY_STATS, { totalCardsReviewed: 2, totalCorrect: 0, totalIncorrect: 2, lastStudyDate: '2026-01-02', streak: 1, devices: { me: { reviewed: 2, incorrect: 2 } } });
+
+    await startSync('user-1');
+
+    expect(getFromStorage(STORAGE_KEYS.INCORRECT_COUNTS, {})).toEqual({ a: 4 });
+    expect(db.row!.incorrect_counts).toEqual({ a: 4, __byDevice: { me: { a: 2 }, other: { a: 1 } } });
+    expect(db.row!.study_stats).toMatchObject({ totalCardsReviewed: 7, totalCorrect: 4, totalIncorrect: 3 });
+  });
+
+  it('carries study history over when a duplicate word is collapsed', async () => {
+    const w = (id: string, updatedAt: string) => ({ id, type: 'vocabulary', word: 'Laconic', definition: id, front: 'Laconic', back: id, updatedAt });
+    setToStorage(STORAGE_KEYS.USER_VOCABULARY, { words: [w('user-1', '2026-01-01')], deletedIds: [], lastUpdated: '2026-01-01' });
+    setToStorage(STORAGE_KEYS.VOCABULARY_PROGRESS, profile({ 'user-1': '2026-01-01' }));
+    seed({ user_vocabulary: { words: [w('user-2', '2026-01-02')], deletedIds: [], lastUpdated: '2026-01-02' } });
+
+    await startSync('user-1');
+
+    expect(cardIds(getFromStorage(STORAGE_KEYS.VOCABULARY_PROGRESS, null))).toEqual(['user-2']);
+    expect((db.row!.user_vocabulary as UserVocabulary).words.map(x => x.id)).toEqual(['user-2']);
+  });
+
   it('reports optional columns the database lacks in the sync status', async () => {
     db.missingColumns = ['user_facts'];
     await startSync('user-1');

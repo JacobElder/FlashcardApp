@@ -8,6 +8,8 @@ export const STORAGE_KEYS = {
   USER_FACTS: 'nyc-user-facts',
   STUDY_STATS: 'nyc-study-stats',
   INCORRECT_COUNTS: 'nyc-incorrect-counts',
+  /** INCORRECT_COUNTS split by device: { deviceId: { cardId: n } }. */
+  INCORRECT_COUNTS_BY_DEVICE: 'nyc-incorrect-counts-by-device',
   /** Supabase user id the local data belongs to. */
   OWNER: 'nyc-owner-user-id',
 } as const;
@@ -21,7 +23,19 @@ export const SYNCED_KEYS: readonly string[] = [
   STORAGE_KEYS.USER_FACTS,
   STORAGE_KEYS.STUDY_STATS,
   STORAGE_KEYS.INCORRECT_COUNTS,
+  STORAGE_KEYS.INCORRECT_COUNTS_BY_DEVICE,
 ];
+
+/** This browser's id for per-device counters. Not cleared on sign-out: it identifies the device, not the user. */
+export const DEVICE_ID_KEY = 'nyc-device-id';
+
+export function getDeviceId(): string {
+  const existing = getFromStorage<string | null>(DEVICE_ID_KEY, null);
+  if (typeof existing === 'string' && existing) return existing;
+  const id = `d-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  setToStorage(DEVICE_ID_KEY, id, 'remote');
+  return id;
+}
 
 /**
  * Where a write came from. Only 'local' writes (the user studying on this
@@ -248,12 +262,24 @@ export function removePendingWord(id: string): void {
 }
 
 // Study statistics
+/** One device's share of the study totals (zeros omitted). */
+export interface DeviceStudyTotals {
+  reviewed?: number;
+  correct?: number;
+  incorrect?: number;
+}
+
 export interface StudyStats {
   totalCardsReviewed: number;
   totalCorrect: number;
   totalIncorrect: number;
   lastStudyDate: string;
   streak: number;
+  /**
+   * The totals split by device, so a sync adds up study on different devices.
+   * Totals not covered here (from before this existed) are "legacy".
+   */
+  devices?: Record<string, DeviceStudyTotals>;
 }
 
 export const EMPTY_STUDY_STATS: StudyStats = {
@@ -286,7 +312,17 @@ export function updateStudyStats(correct: number, incorrect: number): void {
     streak = 1;
   }
 
-  setToStorage(STORAGE_KEYS.STUDY_STATS, {
+  const device = getDeviceId();
+  const mine = stats.devices?.[device] ?? {};
+  setToStorage<StudyStats>(STORAGE_KEYS.STUDY_STATS, {
+    devices: {
+      ...stats.devices,
+      [device]: {
+        reviewed: (mine.reviewed ?? 0) + correct + incorrect,
+        correct: (mine.correct ?? 0) + correct,
+        incorrect: (mine.incorrect ?? 0) + incorrect,
+      },
+    },
     totalCardsReviewed: stats.totalCardsReviewed + correct + incorrect,
     totalCorrect: stats.totalCorrect + correct,
     totalIncorrect: stats.totalIncorrect + incorrect,
@@ -302,7 +338,18 @@ export function getIncorrectCounts(): Record<string, number> {
   return getFromStorage<Record<string, number>>(STORAGE_KEYS.INCORRECT_COUNTS, EMPTY_COUNTS);
 }
 
+export type CountsByDevice = Record<string, Record<string, number>>;
+const EMPTY_BY_DEVICE: CountsByDevice = {};
+
+export function getIncorrectCountsByDevice(): CountsByDevice {
+  return getFromStorage<CountsByDevice>(STORAGE_KEYS.INCORRECT_COUNTS_BY_DEVICE, EMPTY_BY_DEVICE);
+}
+
 export function incrementIncorrectCount(cardId: string): void {
+  const device = getDeviceId();
+  const byDevice = getIncorrectCountsByDevice();
+  const mine = byDevice[device] ?? {};
+  setToStorage(STORAGE_KEYS.INCORRECT_COUNTS_BY_DEVICE, { ...byDevice, [device]: { ...mine, [cardId]: (mine[cardId] ?? 0) + 1 } });
   const counts = getIncorrectCounts();
   setToStorage(STORAGE_KEYS.INCORRECT_COUNTS, { ...counts, [cardId]: (counts[cardId] ?? 0) + 1 });
 }
@@ -313,8 +360,8 @@ export const TROUBLE_GRADUATION_STREAK = 3;
 /**
  * Cards missed more than once that haven't since been answered correctly
  * TROUBLE_GRADUATION_STREAK times in a row. The streak lives in the card's
- * history rather than lowering the miss count, because sync keeps the larger
- * miss count from either device and would undo a decrease.
+ * history rather than lowering the miss count, because miss counts are
+ * grow-only per-device counters that a sync adds up, so a decrease would be undone.
  */
 export function troubleCardIdsFrom(
   counts: Record<string, number>,
