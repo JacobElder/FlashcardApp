@@ -336,7 +336,34 @@ export function setStorageOwner(userId: string): void {
   setToStorage(STORAGE_KEYS.OWNER, userId, 'remote');
 }
 
-// Clear all data
+/** Where an account's local data is kept after a different account signs in on this device. */
+export const backupKey = (userId: string) => `nyc-backup-${userId}`;
+
+/** Copy every data key (as stored) into `userId`'s backup, replacing an older one. */
+export function backupLocalData(userId: string): void {
+  const data: Record<string, unknown> = {};
+  for (const key of Object.values(STORAGE_KEYS)) {
+    if (key === STORAGE_KEYS.OWNER) continue;
+    const value = getFromStorage<unknown>(key, undefined);
+    if (value !== undefined) data[key] = value;
+  }
+  if (Object.keys(data).length === 0) return;
+  setToStorage(backupKey(userId), { savedAt: new Date().toISOString(), data }, 'remote');
+}
+
+/** Put back the data saved by backupLocalData and drop the backup. False if there was none. */
+export function restoreLocalBackup(userId: string): boolean {
+  const backup = getFromStorage<{ data?: Record<string, unknown> } | null>(backupKey(userId), null);
+  if (!backup || typeof backup.data !== 'object' || backup.data === null) return false;
+  const known = new Set<string>(Object.values(STORAGE_KEYS));
+  for (const [key, value] of Object.entries(backup.data)) {
+    if (known.has(key) && key !== STORAGE_KEYS.OWNER) setToStorage(key, value, 'remote');
+  }
+  removeFromStorage(backupKey(userId));
+  return true;
+}
+
+/** Clear this account's data keys (backups of other accounts are kept). */
 export function clearAllData(): void {
   Object.values(STORAGE_KEYS).forEach(key => {
     removeFromStorage(key);
