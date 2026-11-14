@@ -1,6 +1,0 @@
-openai
-sentence-transformers
-beautifulsoup4
-requests
-numpy
-scikit-learn
