@@ -185,10 +185,21 @@ export function answerCount(history: IRTCardHistory | undefined): number {
 }
 
 /**
+ * Questions that only make sense with the options on screen ("Which of these
+ * is NOT a city in India?"). Without them the question has no answer.
+ */
+const REFERS_TO_OPTIONS = /\b(of|from) (the following|these|those)\b|\bwhich one of (the|these)\b/i;
+
+export function needsOptions(card: Pick<FlashCard, 'front' | 'options'>): boolean {
+  return Boolean(card.options?.length) && REFERS_TO_OPTIONS.test(card.front);
+}
+
+/**
  * Which format to show a card in. A card with options is shown as multiple
  * choice while it's being learned: when it's new, when its last answer was a
  * miss, or (below the MC box cap) when open recall is unlikely at the current
  * ability. Otherwise, and always for cards without options, open recall.
+ * A question that refers to its options is always multiple choice.
  */
 export function chooseFormat(
   userAbility: number,
@@ -197,6 +208,7 @@ export function chooseFormat(
   priors: Record<string, number> = {}
 ): CardFormat {
   if (!card.options?.length) return 'open';
+  if (needsOptions(card)) return 'mc';
   if (answerCount(history) === 0) return 'mc';
   if (history?.correctStreak === 0) return 'mc';
   if ((history?.leitnerBox ?? 0) >= MC_BOX_CAP) return 'open';
