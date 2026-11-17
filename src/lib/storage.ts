@@ -1,4 +1,4 @@
-import type { IRTCardHistory, NewWordFormData, PendingWord, UserVocabulary, VocabularyCard } from '../types';
+import type { IRTCardHistory, IRTProfile, NewWordFormData, PendingWord, UserVocabulary, VocabularyCard } from '../types';
 
 export const STORAGE_KEYS = {
   TRIVIA_PROGRESS: 'nyc-trivia-progress',
@@ -280,6 +280,11 @@ export interface StudyStats {
    * Totals not covered here (from before this existed) are "legacy".
    */
   devices?: Record<string, DeviceStudyTotals>;
+  /**
+   * When study progress was last reset (ISO). Sync discards progress from a
+   * copy with an older reset point instead of merging it back in.
+   */
+  progressResetAt?: string;
 }
 
 export const EMPTY_STUDY_STATS: StudyStats = {
@@ -408,6 +413,22 @@ export function restoreLocalBackup(userId: string): boolean {
   }
   removeFromStorage(backupKey(userId));
   return true;
+}
+
+/**
+ * Start every deck over: card schedules, ability, stats, streak and miss
+ * counts. Words and facts the user added are kept. Writes are 'local' so they
+ * sync, and the reset point makes sync drop older progress on other devices
+ * and in the cloud rather than merging it back.
+ */
+export function resetStudyProgress(now: Date = new Date()): void {
+  const empty: IRTProfile = { ability: 0, cardHistory: {} };
+  setToStorage(STORAGE_KEYS.TRIVIA_PROGRESS, empty);
+  setToStorage(STORAGE_KEYS.VOCABULARY_PROGRESS, empty);
+  setToStorage(STORAGE_KEYS.DATA_SCIENCE_PROGRESS, empty);
+  setToStorage(STORAGE_KEYS.INCORRECT_COUNTS, {});
+  setToStorage(STORAGE_KEYS.INCORRECT_COUNTS_BY_DEVICE, {});
+  setToStorage<StudyStats>(STORAGE_KEYS.STUDY_STATS, { ...EMPTY_STUDY_STATS, progressResetAt: now.toISOString() });
 }
 
 /** Clear this account's data keys (backups of other accounts are kept). */

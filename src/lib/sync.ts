@@ -21,6 +21,7 @@ import {
   mergeProfiles,
   mergeStats,
   mergeVocabularyWithAliases,
+  progressResetAt,
 } from './merge';
 import { mergeFacts } from './facts';
 import type { IRTProfile, UserFacts, UserVocabulary } from '../types';
@@ -143,6 +144,33 @@ function writeIfChanged<T>(key: string, value: T) {
   }
 }
 
+const EMPTY_PROFILE: IRTProfile = { ability: 0, cardHistory: {} };
+
+/** Local data with study progress wiped (added words and facts kept). */
+function withoutProgress(local: LocalSnapshot): LocalSnapshot {
+  return {
+    ...local,
+    trivia: EMPTY_PROFILE,
+    vocabulary: EMPTY_PROFILE,
+    // Empty rather than undefined so a device without the cloud column still clears it
+    dataScience: EMPTY_PROFILE,
+    stats: undefined,
+    incorrectCounts: {},
+    incorrectCountsByDevice: undefined,
+  };
+}
+
+/** The cloud row with study progress dropped, so only local progress survives the merge. */
+function withoutRemoteProgress(row: RemoteRow): RemoteRow {
+  const rest = { ...row };
+  delete rest.trivia_profile;
+  delete rest.vocabulary_profile;
+  delete rest.data_science_profile;
+  delete rest.study_stats;
+  delete rest.incorrect_counts;
+  return rest;
+}
+
 function toRow(local: LocalSnapshot): ProgressRow {
   const row: ProgressRow = {
     trivia_profile: local.trivia ?? { ability: 0, cardHistory: {} },
@@ -180,7 +208,7 @@ type SyncAttempt = 'done' | 'conflict' | 'stale' | 'retry';
 /** Merge the cloud row into local storage, then upload the result if the cloud lacks anything. */
 async function syncOnce(uid: string): Promise<SyncAttempt> {
   const table = () => getSupabase().from('user_progress');
-  const { data, error } = await table()
+  const { data: fetched, error } = await table()
     .select([BASE_COLUMNS, ...OPTIONAL_COLUMNS.filter(hasColumn)].join(', '))
     .eq('user_id', uid)
     .maybeSingle<RemoteRow>();
@@ -188,9 +216,16 @@ async function syncOnce(uid: string): Promise<SyncAttempt> {
   if (missing) return dropColumn(missing);
   if (error) throw error;
   if (uid !== userId) return 'stale'; // signed out while the request was in flight
+  let data = fetched;
 
   // Read local data after the download, with no await in between, so no local write is missed
-  const local = readLocal();
+  let local = readLocal();
+  // After a progress reset, the copy with the older reset point loses its
+  // study progress outright; merging it would bring the old progress back
+  const localReset = progressResetAt(local.stats);
+  const remoteReset = progressResetAt(data?.study_stats);
+  if (remoteReset > localReset) local = withoutProgress(local);
+  if (data && localReset > remoteReset) data = withoutRemoteProgress(data);
   const vocab = mergeVocabularyWithAliases(local.userVocabulary, data?.user_vocabulary);
   const { [COUNTS_BY_DEVICE_FIELD]: remoteByDevice, ...remoteCounts } = (data?.incorrect_counts ?? {}) as Record<string, unknown>;
   const counts = mergeCounts(
