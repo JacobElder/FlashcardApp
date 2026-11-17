@@ -273,6 +273,15 @@ describe('format selection', () => {
     expect(chooseFormat(0, card('a', opts), seen())).toBe('open');
   });
 
+  it('always shows MC for a question that refers to its options', () => {
+    const which = card('a', { ...opts, front: 'Which of these is NOT a city in India?' });
+    expect(chooseFormat(5, which, seen({ leitnerBox: 4, correctStreak: 6 }))).toBe('mc');
+    const valve = triviaCards.find(c => c.front.startsWith('Which one of the following titles by Valve'))!;
+    expect(chooseFormat(5, valve, seen({ leitnerBox: 4 }))).toBe('mc');
+    // Without options there's nothing to show, so it stays open recall
+    expect(chooseFormat(0, { ...which, options: undefined }, undefined)).toBe('open');
+  });
+
   it('shows MC while open recall is unlikely, below the MC box cap', () => {
     const hard = card('a', { ...opts, difficulty: 1.5 }); // P(open) at ability 0 is ~0.18
     expect(chooseFormat(0, hard, seen())).toBe('mc');
