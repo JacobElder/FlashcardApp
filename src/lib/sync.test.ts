@@ -87,7 +87,7 @@ vi.mock('./supabase', () => {
 });
 
 import { claimLocalData, flushPush, getSyncStatus, hasUnsyncedChanges, stableStringify, startSync, stopSync, syncNow } from './sync';
-import { STORAGE_KEYS, backupKey, getFromStorage, getStorageOwner, setToStorage } from './storage';
+import { STORAGE_KEYS, backupKey, getFromStorage, getStorageOwner, resetStudyProgress, setToStorage } from './storage';
 
 const profile = (cards: Record<string, string>): IRTProfile => ({
   ability: 0,
@@ -96,6 +96,7 @@ const profile = (cards: Record<string, string>): IRTProfile => ({
   ),
 });
 
+const EMPTY_STATS = { totalCardsReviewed: 0, totalCorrect: 0, totalIncorrect: 0, lastStudyDate: '', streak: 0 };
 const cardIds = (p: unknown) => Object.keys((p as IRTProfile).cardHistory).sort();
 const localTrivia = () => getFromStorage<IRTProfile>(STORAGE_KEYS.TRIVIA_PROGRESS, { ability: 0, cardHistory: {} });
 const vocab = (words: string[], lastUpdated = '2026-01-01'): UserVocabulary => ({
@@ -147,6 +148,63 @@ describe('cloud sync', () => {
     expect(db.writes).toHaveLength(1);
     expect(cardIds(db.row!.trivia_profile)).toEqual(['local', 'remote']);
     expect(getSyncStatus().status).toBe('synced');
+  });
+
+  describe('progress reset', () => {
+    const oldStats = { totalCardsReviewed: 20, totalCorrect: 17, totalIncorrect: 3, lastStudyDate: '2026-11-16', streak: 2 };
+
+    it('wipes the cloud progress instead of merging it back after a local reset', async () => {
+      seed({
+        trivia_profile: profile({ old: '2026-11-16' }),
+        vocabulary_profile: profile({ word: '2026-11-16' }),
+        study_stats: oldStats,
+        incorrect_counts: { old: 2 },
+        user_vocabulary: vocab(['mine']),
+      });
+      setToStorage(STORAGE_KEYS.USER_VOCABULARY, vocab(['mine']));
+      resetStudyProgress(new Date('2026-11-17T00:00:00Z'));
+
+      await startSync('user-1');
+
+      expect(cardIds(localTrivia())).toEqual([]);
+      expect(cardIds(db.row!.trivia_profile)).toEqual([]);
+      expect(cardIds(db.row!.vocabulary_profile)).toEqual([]);
+      expect(db.row!.study_stats).toMatchObject({ totalCorrect: 0, streak: 0, progressResetAt: '2026-11-17T00:00:00.000Z' });
+      expect(db.row!.incorrect_counts).toEqual({});
+      // Added words aren't progress
+      expect((db.row!.user_vocabulary as UserVocabulary).words.map(w => w.id)).toEqual(['mine']);
+    });
+
+    it('wipes an out-of-date device when the cloud was reset elsewhere', async () => {
+      setToStorage(STORAGE_KEYS.TRIVIA_PROGRESS, profile({ old: '2026-11-16' }));
+      setToStorage(STORAGE_KEYS.STUDY_STATS, oldStats);
+      setToStorage(STORAGE_KEYS.INCORRECT_COUNTS, { old: 2 });
+      setToStorage(STORAGE_KEYS.USER_VOCABULARY, vocab(['mine']));
+      seed({
+        trivia_profile: profile({ fresh: '2026-11-18' }),
+        study_stats: { ...EMPTY_STATS, totalCardsReviewed: 1, totalCorrect: 1, lastStudyDate: '2026-11-18', streak: 1, progressResetAt: '2026-11-17T00:00:00.000Z' },
+        incorrect_counts: {},
+      });
+
+      await startSync('user-1');
+
+      expect(cardIds(localTrivia())).toEqual(['fresh']);
+      expect(getFromStorage(STORAGE_KEYS.STUDY_STATS, null)).toMatchObject({ totalCorrect: 1, progressResetAt: '2026-11-17T00:00:00.000Z' });
+      expect(getFromStorage(STORAGE_KEYS.INCORRECT_COUNTS, null)).toEqual({});
+      expect(getFromStorage<UserVocabulary | null>(STORAGE_KEYS.USER_VOCABULARY, null)!.words.map(w => w.id)).toEqual(['mine']);
+      expect(cardIds(db.row!.trivia_profile)).toEqual(['fresh']);
+    });
+
+    it('merges normally once both copies share the reset point', async () => {
+      const resetAt = '2026-11-17T00:00:00.000Z';
+      setToStorage(STORAGE_KEYS.TRIVIA_PROGRESS, profile({ a: '2026-11-18' }));
+      setToStorage(STORAGE_KEYS.STUDY_STATS, { ...EMPTY_STATS, progressResetAt: resetAt });
+      seed({ trivia_profile: profile({ b: '2026-11-18' }), study_stats: { ...EMPTY_STATS, progressResetAt: resetAt } });
+
+      await startSync('user-1');
+
+      expect(cardIds(localTrivia())).toEqual(['a', 'b']);
+    });
   });
 
   it('creates the row on first sync', async () => {

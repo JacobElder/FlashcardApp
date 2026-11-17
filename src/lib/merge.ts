@@ -373,8 +373,13 @@ function normalizeStats(stats: StudyStats): StudyStats {
     lastStudyDate: text(stats.lastStudyDate),
     streak: finite(stats.streak),
     ...(isRecord(stats.devices) ? { devices: stats.devices } : {}),
+    ...(text(stats.progressResetAt) ? { progressResetAt: text(stats.progressResetAt) } : {}),
   };
 }
+
+/** A copy's progress reset point ('' if it was never reset). */
+export const progressResetAt = (stats: unknown): string =>
+  isRecord(stats) ? text(stats.progressResetAt) : '';
 
 const STAT_COUNTS = ['reviewed', 'correct', 'incorrect'] as const;
 const statTotals = (s: StudyStats): Record<keyof DeviceStudyTotals, number> => ({
@@ -401,5 +406,8 @@ export function mergeStats(local: StudyStats | undefined, remote: StudyStats | u
     lastStudyDate: latest.lastStudyDate,
     streak: r.lastStudyDate === l.lastStudyDate ? Math.max(l.streak, r.streak) : latest.streak,
     ...(byDevice ? { devices: byDevice } : {}),
+    ...(l.progressResetAt || r.progressResetAt
+      ? { progressResetAt: [l.progressResetAt ?? '', r.progressResetAt ?? ''].sort()[1] }
+      : {}),
   };
 }
