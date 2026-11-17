@@ -76,9 +76,10 @@ function newSession(): StudySession {
 }
 
 /**
- * Next Leitner box for a rating. "Hard" is a correct answer that doesn't earn
- * a longer interval, in either format (a box 0 card stays in box 0 and comes
- * back next session). A correct MC answer can't move a card past MC_BOX_CAP
+ * Next Leitner box for a rating. "Hard" counts as a miss everywhere else
+ * (session tally, stats, IRT), but it's gentler than "Again" here: the card
+ * keeps its box instead of dropping to 0 (a box 0 card stays in box 0 and comes
+ * back tomorrow). A correct MC answer can't move a card past MC_BOX_CAP
  * on its own, but never demotes one already above it.
  */
 export function nextBox(box: number, rating: Rating, format: CardFormat): number {
@@ -210,7 +211,8 @@ export function useAdaptiveTesting({
     if (!currentCard || ratedCardId.current === currentCard.id) return;
     ratedCardId.current = currentCard.id;
 
-    const isCorrect = rating >= RATING_VALUES.hard;
+    // "Hard" means you didn't really know it, so only Good and Easy count as correct
+    const isCorrect = rating >= RATING_VALUES.good;
     const now = new Date();
     const history: IRTCardHistory = irtProfile.cardHistory[currentCard.id] ??
       { cardId: currentCard.id, timesAnswered: 0, timesCorrect: 0, leitnerBox: 0 };
@@ -223,12 +225,13 @@ export function useAdaptiveTesting({
     );
 
     // Studying a card before it's due (studying ahead, trouble drills) can't
-    // promote it or push its review out, but a miss still demotes it
+    // promote it or push its review out, but "Again" still demotes it
     const currentBox = history.leitnerBox ?? 0;
     const wasDue = isDue(irtProfile.cardHistory[currentCard.id], now.getTime());
-    const box = wasDue || !isCorrect ? nextBox(currentBox, rating, currentFormat) : currentBox;
+    const reschedule = wasDue || rating === RATING_VALUES.again;
+    const box = reschedule ? nextBox(currentBox, rating, currentFormat) : currentBox;
     const intervalBox = currentFormat === 'mc' ? Math.min(box, MC_BOX_CAP) : box;
-    const nextReview = wasDue || !isCorrect
+    const nextReview = reschedule
       ? reviewDateFor(now, BOX_INTERVAL_DAYS[intervalBox]).toISOString()
       : history.nextReviewDate;
 
@@ -274,7 +277,7 @@ export function useAdaptiveTesting({
       updatedAt: now.toISOString(),
     });
 
-    if (rating === RATING_VALUES.again) {
+    if (!isCorrect) {
       incrementIncorrectCount(currentCard.id);
     }
     updateStudyStats(isCorrect ? 1 : 0, isCorrect ? 0 : 1);

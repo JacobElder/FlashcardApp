@@ -27,7 +27,7 @@ const ratingOptions: RatingOption[] = [
     label: 'Hard',
     color: 'bg-orange-500',
     hoverColor: 'hover:bg-orange-600',
-    description: 'Struggled to recall',
+    description: 'Barely knew it',
   },
   {
     name: 'good',

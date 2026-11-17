@@ -27,8 +27,12 @@ export const MC_RECALL_THRESHOLD = 0.35;
 /** Rough information per past answer, for profiles saved before `abilityInfo` existed. */
 const LEGACY_INFO_PER_OPEN_ANSWER = 0.2;
 const LEGACY_INFO_PER_MC_ANSWER = 0.1;
-/** Review interval in days for each Leitner box. */
-export const BOX_INTERVAL_DAYS = [0, 1, 3, 7, 14, 30];
+/**
+ * Review interval in days for each Leitner box. A missed card (box 0) waits
+ * until tomorrow: with no wait it was due again at once and, since due cards
+ * come before new ones, every reopen served the same missed cards.
+ */
+export const BOX_INTERVAL_DAYS = [1, 1, 3, 7, 14, 30];
 export const MAX_BOX = BOX_INTERVAL_DAYS.length - 1;
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));

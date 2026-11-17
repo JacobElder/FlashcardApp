@@ -40,7 +40,7 @@ describe('useAdaptiveTesting', () => {
     expect(result.current.hasMoreCards).toBe(true);
   });
 
-  it('treats "Hard" as correct without lengthening the interval', () => {
+  it('counts "Hard" as a miss but keeps the card in its box', () => {
     setToStorage<IRTProfile>(KEY, {
       ability: 0,
       cardHistory: Object.fromEntries(cards.map(c => [c.id, { cardId: c.id, timesAnswered: 2, timesCorrect: 2, leitnerBox: 3 }])),
@@ -51,9 +51,45 @@ describe('useAdaptiveTesting', () => {
 
     const history = readProfile().cardHistory[id];
     expect(history.leitnerBox).toBe(3);
-    expect(history.timesCorrect).toBe(3);
-    expect(result.current.session.correctCount).toBe(1);
-    expect(getIncorrectCounts()[id]).toBeUndefined();
+    expect(history.timesCorrect).toBe(2);
+    expect(history.correctStreak).toBe(0);
+    expect(result.current.session.correctCount).toBe(0);
+    expect(result.current.session.incorrectCount).toBe(1);
+    expect(getIncorrectCounts()[id]).toBe(1);
+    expect(getStudyStats().totalIncorrect).toBe(1);
+    expect(readProfile().ability).toBeLessThan(0);
+  });
+
+  it('brings a missed card back tomorrow, not on the next reopen', () => {
+    const { result, unmount } = render();
+    const missed = result.current.currentCard!.id;
+    act(() => result.current.rateCard(RATING_VALUES.again));
+    const due = new Date(readProfile().cardHistory[missed].nextReviewDate!);
+    const tomorrow = new Date();
+    tomorrow.setHours(0, 0, 0, 0);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    expect(due.getTime()).toBe(tomorrow.getTime());
+    unmount();
+
+    // Reopening the deck the same day starts with a different card
+    const reopened = render();
+    expect(reopened.result.current.currentCard!.id).not.toBe(missed);
+  });
+
+  it('does not push out a card studied ahead and rated "Hard"', () => {
+    const future = new Date(Date.now() + 86400000 * 2).toISOString();
+    setToStorage<IRTProfile>(KEY, {
+      ability: 0,
+      cardHistory: Object.fromEntries(cards.map(c => [c.id, { cardId: c.id, timesAnswered: 2, timesCorrect: 2, leitnerBox: 3, nextReviewDate: future }])),
+    });
+    const { result } = render();
+    act(() => result.current.studyAhead());
+    const id = result.current.currentCard!.id;
+    act(() => result.current.rateCard(RATING_VALUES.hard));
+
+    const history = readProfile().cardHistory[id];
+    expect(history.leitnerBox).toBe(3);
+    expect(history.nextReviewDate).toBe(future);
   });
 
   it('resets the box and counts a miss on "Again"', () => {
@@ -364,8 +400,8 @@ describe('useAdaptiveTesting rules that need their own check', () => {
 
   it('lets a card be rated again after the session is restarted', () => {
     const one = [cards[0]];
-    const { result } = renderHook(() => useAdaptiveTesting({ cards: one, storageKey: KEY }));
-    // "Again" keeps the card due right away, so the restarted session offers it again
+    // ignoreSchedule (trouble drill) offers the card again even though it's not due
+    const { result } = renderHook(() => useAdaptiveTesting({ cards: one, storageKey: KEY, ignoreSchedule: true }));
     act(() => result.current.rateCard(RATING_VALUES.again));
     expect(result.current.hasMoreCards).toBe(false);
 
@@ -386,8 +422,11 @@ describe('correct-answer streak', () => {
       act(() => result.current.resetSession());
     };
     rate(RATING_VALUES.good);
-    rate(RATING_VALUES.hard);
+    rate(RATING_VALUES.easy);
     expect(streak()).toBe(2);
+    rate(RATING_VALUES.hard);
+    expect(streak()).toBe(0);
+    rate(RATING_VALUES.good);
     rate(RATING_VALUES.again);
     expect(streak()).toBe(0);
   });

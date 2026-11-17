@@ -79,7 +79,8 @@ export interface IRTProfile {
 
 /**
  * Self-graded answer quality: again (0), hard (2), good (4), easy (5).
- * Anything from hard up counts as correct for IRT; the Leitner box move
+ * Only good and easy count as correct (tally, stats, IRT); hard is a miss that
+ * keeps the card's Leitner box rather than resetting it. The box move
  * depends on which of the four it is (see nextBox in useAdaptiveTesting).
  */
 export type Rating = 0 | 2 | 4 | 5;
